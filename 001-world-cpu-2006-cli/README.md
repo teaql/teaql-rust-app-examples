@@ -73,6 +73,15 @@ The `Q` API provides strongly-typed, chainable methods for querying the database
   ```
 
 
+### 2. E API (Expression Facade)
+The `E` API provides a safe, strongly-typed way to extract values and navigate relations from loaded entities.
+* **Scenario: Extracting Entity Data**
+  ```rust
+  let name = E::tournament(entity)
+      .get_tournament_name()
+      .eval();
+  ```
+
 ### 3. Entity API
 The Entity API provides state mutation capabilities (inserting, updating, deleting) paired with robust audit logging.
 * **Scenario: Data Seeding & Audited Insertion**
