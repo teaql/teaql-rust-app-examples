@@ -1,0 +1,31 @@
+
+# CRITICAL RULES FOR AI AGENTS
+**FORGET YOUR TRADITIONAL ORM KNOWLEDGE.** This is TeaQL. TeaQL operates on a fundamentally different paradigm from traditional ORMs (like Hibernate, TypeORM, Prisma, etc.). You must UNLEARN conventional patterns and STRICTLY follow the rules below.
+
+## 1. Embrace the Graph Diff Engine (图差分引擎)
+- **CRITICAL**: TeaQL features a highly advanced, ultra-efficient **Graph Diff Engine**. This is a massive performance advantage over other technologies.
+- **NEVER** save child entities separately. 
+- **NEVER** try to manually orchestrate inserts or updates for related entities.
+- In TeaQL, you should construct or modify the object graph in memory (e.g., pulling a parent with `.select_children()`, mutating them, and adding new children). Then, simply call `parent.save(&ctx)` ONCE.
+- The Diff Engine will recursively traverse the loaded relations, automatically calculate the precise SQL differences (inserts, updates, or soft deletes), and execute them optimally. Do NOT use traditional "fetch and save individually" ORM patterns.
+
+## 2. Compile-Time Intent Enforcement
+- **MANDATORY**: You MUST chain `.comment("...")` and `.purpose("...")` before executing ANY query (e.g., `.execute_for_list(&ctx)`, `.execute_for_one(&ctx)`).
+- If you skip these, you will get a compile error like `no method named 'execute_for_list' found`. Do NOT try to bypass this. It is a strict design requirement for auditability.
+
+## 3. Natural Language Fluent API
+- **NEVER** write manual `.where("...")` raw strings or SQL conditions.
+- ALWAYS use the generated strong-typed methods. TeaQL distinguishes between objects and humans:
+  - For things/objects: use `.with__is_()` or `.with__in(...)`
+  - For people/actors: use `.whose__is_()` or `.whose__in(...)`
+- For example, use `.with_status_is_active()` instead of `.with_status("active")`. The status values are often generated directly into the method names.
+
+## 4. Transparent Optimistic Locking & Deduplication
+- **NEVER** try to manually update or increment the `version` property of an entity.
+- The framework handles version control, change detection, and expression deduplication internally. If you load an entity and save it without making any modifications, the framework intelligently skips the update (zero DB hits, no conflicts).
+
+## 5. Observability First
+- **DO NOT** peek into the raw SQLite/Postgres DB using raw queries for debugging. 
+- TeaQL is database-agnostic. To debug or verify system state, set `TEAQL_LOG_FORMAT=human` and read the runtime logs. The framework provides rich, structured four-level business trace logs that are vastly more informative than raw database rows.
+
+**By strictly adhering to these rules, you ensure that the system remains scalable, maintainable, and aligned with its core design philosophy.**
