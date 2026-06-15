@@ -47,3 +47,49 @@ docker run -it --rm worldcup2026-rust group A
 * `models/` - Original domain models used to define the schema.
 * `generate-lib/` - The generated TeaQL Rust entity library containing the strongly-typed data structures and SQL mappers.
 * `rust-workspace/` - The main Rust application containing the interactive CLI and business logic.
+
+## APIs Used 📚
+This project extensively uses the TeaQL framework APIs across various scenarios:
+
+### 1. Q API (Query API)
+The `Q` API provides strongly-typed, chainable methods for querying the database.
+* **Scenario: Simple Filtering**
+  ```rust
+  let g_opt = Q::match_groups()
+      .with_group_letter_is("A")
+      .purpose("cli")
+      .execute_for_list(ctx).await?.data.pop();
+  ```
+* **Scenario: Relational Joins & Complex Sorting**
+  Fetch standings alongside nested relational data (like teams) and apply multiple ordering rules.
+  ```rust
+  let standings = Q::group_standings()
+      .select_tournament_team_with(Q::tournament_teams().select_self())
+      .with_match_group_matching(Q::match_groups().with_id_is(g.id()))
+      .order_by_points_desc()
+      .order_by_goal_difference_desc()
+      .order_by_goals_for_desc()
+      .purpose("cli").execute_for_list(ctx).await?;
+  ```
+
+### 2. E API (Expression API)
+The `E` (or `Expr`) API is used for constructing complex logical conditions, especially when standard generated `.with_...` filters aren't enough.
+* **Scenario: Custom Logical Filtering**
+  Combine multiple conditions such as `OR`, `AND`, or comparisons.
+  ```rust
+  // Fallback to teaql_core::Expr for custom logical filters
+  .filter(E::or(E::gt("played", 0), E::eq("status", "active")))
+  ```
+
+### 3. Entity API
+The Entity API provides state mutation capabilities (inserting, updating, deleting) paired with robust audit logging.
+* **Scenario: Data Seeding & Audited Insertion**
+  Create new records, mutate strongly-typed fields, and persist them to the database while recording the exact "purpose" for the audit logs.
+  ```rust
+  let mut t = Q::tournaments().new_entity(ctx);
+  t.update_tournament_name("FIFA World Cup 2026".to_string());
+  t.update_total_teams(48);
+  
+  // Saves the entity while generating a trace log
+  t.audit_as("Seed tournament").save(ctx).await?;
+  ```
