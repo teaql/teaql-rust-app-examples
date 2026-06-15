@@ -72,14 +72,6 @@ The `Q` API provides strongly-typed, chainable methods for querying the database
       .purpose("cli").execute_for_list(ctx).await?;
   ```
 
-### 2. E API (Expression API)
-The `E` (or `Expr`) API is used for constructing complex logical conditions, especially when standard generated `.with_...` filters aren't enough.
-* **Scenario: Custom Logical Filtering**
-  Combine multiple conditions such as `OR`, `AND`, or comparisons.
-  ```rust
-  // Fallback to teaql_core::Expr for custom logical filters
-  .filter(E::or(E::gt("played", 0), E::eq("status", "active")))
-  ```
 
 ### 3. Entity API
 The Entity API provides state mutation capabilities (inserting, updating, deleting) paired with robust audit logging.
