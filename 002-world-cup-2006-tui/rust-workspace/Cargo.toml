@@ -1,0 +1,32 @@
+# TEAQL WARNING: This project uses TeaQL. TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
+# Do NOT apply traditional ORM logic here. You must strictly follow the generated API.
+[package]
+name = "fifa-world-cup-2026-service-workspace"
+version = "0.1.0"
+edition = "2021"
+description = "Application workspace for the TeaQL domain crate fifa-world-cup-2026-service"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+fifa_world_cup_2026_service = { package = "fifa-world-cup-2026-service", path = "../generate-lib/lib" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+teaql-core = "4.0.3"
+clap = { version = "4.6.1", features = ["derive"] }
+teaql-provider-sqlite = "4.0.3"
+dirs = "6.0.0"
+chrono = "0.4.45"
+regex = "1.12.4"
+teaql-runtime = "4.0.3"
+ratatui = "0.30.1"
+crossterm = "0.29.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = "0.11"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1"
+
+
+[[bin]]
+name = "fix_data"
+path = "src/fix_data.rs"
+

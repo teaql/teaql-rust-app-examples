@@ -1,0 +1,249 @@
+<root
+  alias_model_name="fifa_world_cup_2026"
+  chinese_name="FIFA世界杯2026管理系统"
+  english_name="Fifa World Cup 2026 Management System"
+  name="fifa-world-cup-2026-service"
+  cfg_mask_china_mobile="false"
+  data_service="sqlite"
+  org="example"
+  _module_key="root"
+>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MODULE: Basic Data (basic-data)                                      -->
+  <!-- Constant/enum objects for match stages, statuses, goal & card types,  -->
+  <!-- and confederations.                                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Match Stage — the phase of the tournament a match belongs to -->
+  <match_stage
+    id="id()"
+    name="string()"
+    code="string()"
+    tournament="tournament()"
+    _constant="true"
+    _identifier="code"
+    _name="Match Stage"
+    _module="Basic Data"
+    _module_key="basic-data"
+  >
+    <_value id="1001" name="Group"            code="GROUP"         />
+    <_value id="1002" name="Round of 32"      code="ROUND_OF_32"  />
+    <_value id="1003" name="Round of 16"      code="ROUND_OF_16"  />
+    <_value id="1004" name="Quarter Final"    code="QUARTER_FINAL"/>
+    <_value id="1005" name="Semi Final"       code="SEMI_FINAL"   />
+    <_value id="1006" name="Third Place"      code="THIRD_PLACE"  />
+    <_value id="1007" name="Final"            code="FINAL"        />
+  </match_stage>
+
+  <!-- Match Status — current state of a match -->
+  <match_status
+    id="id()"
+    name="string()"
+    code="string()"
+    tournament="tournament()"
+    _constant="true"
+    _identifier="code"
+    _name="Match Status"
+    _module="Basic Data"
+    _module_key="basic-data"
+  >
+    <_value id="1001" name="Scheduled"  code="SCHEDULED" />
+    <_value id="1002" name="Live"       code="LIVE"      />
+    <_value id="1003" name="Finished"   code="FINISHED"  />
+    <_value id="1004" name="Postponed"  code="POSTPONED" />
+  </match_status>
+
+  <!-- Goal Category — how a goal was scored -->
+  <goal_category
+    id="id()"
+    name="string()"
+    code="string()"
+    tournament="tournament()"
+    _constant="true"
+    _identifier="code"
+    _name="Goal Category"
+    _module="Basic Data"
+    _module_key="basic-data"
+  >
+    <_value id="1001" name="Normal"    code="NORMAL"    />
+    <_value id="1002" name="Penalty"   code="PENALTY"   />
+    <_value id="1003" name="Own Goal"  code="OWN_GOAL"  />
+    <_value id="1004" name="Free Kick" code="FREE_KICK" />
+  </goal_category>
+
+  <!-- Card Category — type of disciplinary card -->
+  <card_category
+    id="id()"
+    name="string()"
+    code="string()"
+    tournament="tournament()"
+    _constant="true"
+    _identifier="code"
+    _name="Card Category"
+    _module="Basic Data"
+    _module_key="basic-data"
+  >
+    <_value id="1001" name="Yellow"        code="YELLOW"        />
+    <_value id="1002" name="Red"           code="RED"           />
+    <_value id="1003" name="Second Yellow" code="SECOND_YELLOW" />
+  </card_category>
+
+  <!-- Confederation — continental football governing body -->
+  <confederation
+    id="id()"
+    name="string()"
+    code="string()"
+    tournament="tournament()"
+    _constant="true"
+    _identifier="code"
+    _name="Confederation"
+    _module="Basic Data"
+    _module_key="basic-data"
+  >
+    <_value id="1001" name="AFC"      code="AFC"      />
+    <_value id="1002" name="CAF"      code="CAF"      />
+    <_value id="1003" name="CONCACAF" code="CONCACAF" />
+    <_value id="1004" name="CONMEBOL" code="CONMEBOL" />
+    <_value id="1005" name="OFC"      code="OFC"      />
+    <_value id="1006" name="UEFA"     code="UEFA"     />
+  </confederation>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MODULE: Tournament Management (tournament-management)                -->
+  <!-- Domain root and core tournament structure objects.                    -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Tournament — the domain root representing the entire competition -->
+  <tournament
+    tournament_name="FIFA World Cup 2026"
+    host_countries="United States, Mexico, Canada"
+    start_date="2026-06-11"
+    end_date="2026-07-19"
+    total_teams="48"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Tournament"
+    _module="Tournament Management"
+    _module_key="tournament-management"
+  />
+
+  <!-- Tournament Team — a national team participating in the tournament -->
+  <tournament_team
+    team_name="Brazil"
+    team_code="BRA"
+    emoji_flag="🇧🇷"
+    fifa_ranking="3"
+    manager_name="Dorival Junior"
+    confederation="confederation()"
+    group_letter="C"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Tournament Team"
+    _module="Tournament Management"
+    _module_key="tournament-management"
+  />
+
+  <!-- Match Group — one of the 12 groups (A through L) in the tournament -->
+  <match_group
+    group_letter="A"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Match Group"
+    _module="Tournament Management"
+    _module_key="tournament-management"
+  />
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MODULE: Match Management (match-management)                          -->
+  <!-- Individual match records, goals, and disciplinary cards.             -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Tournament Match — a single match played in the tournament -->
+  <tournament_match
+    match_number="1"
+    match_date="2026-06-11"
+    venue_name="Azteca Stadium"
+    venue_city="Mexico City"
+    venue_country="Mexico"
+    home_score="0"
+    away_score="0"
+    extra_time_home="0"
+    extra_time_away="0"
+    penalty_home="0"
+    penalty_away="0"
+    home_team="tournament_team()"
+    away_team="tournament_team()"
+    match_stage="match_stage()"
+    match_group="match_group()"
+    match_status="match_status()"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Tournament Match"
+    _module="Match Management"
+    _module_key="match-management"
+  />
+
+  <!-- Match Goal — a goal scored during a match -->
+  <match_goal
+    player_name="Vinicius Jr"
+    minute_scored="23"
+    tournament_match="tournament_match()"
+    tournament_team="tournament_team()"
+    goal_category="goal_category()"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Match Goal"
+    _module="Match Management"
+    _module_key="match-management"
+  />
+
+  <!-- Match Card — a disciplinary card issued during a match -->
+  <match_card
+    player_name="Casemiro"
+    minute_issued="34"
+    tournament_match="tournament_match()"
+    tournament_team="tournament_team()"
+    card_category="card_category()"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Match Card"
+    _module="Match Management"
+    _module_key="match-management"
+  />
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MODULE: Standings (standings)                                        -->
+  <!-- Computed group standings for each team.                              -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Group Standing — a team's current record within their group -->
+  <group_standing
+    played="0"
+    won="0"
+    drawn="0"
+    lost="0"
+    goals_for="0"
+    goals_against="0"
+    goal_difference="0"
+    points="0"
+    standing_rank="1"
+    tournament_team="tournament_team()"
+    match_group="match_group()"
+    tournament="tournament()"
+    create_time="createTime()"
+    update_time="updateTime()"
+    _name="Group Standing"
+    _module="Standings"
+    _module_key="standings"
+  />
+
+</root>
