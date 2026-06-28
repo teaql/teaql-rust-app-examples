@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust-lib-core", "rust-app-console"]
+resolver = "2"

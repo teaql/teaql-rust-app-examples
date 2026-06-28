@@ -1,0 +1,12 @@
+[package]
+name = "linux-system-info"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+teaql-core = { path = "/home/philip/githome/teaql-rs/teaql-core" }
+teaql-data-service = { path = "/home/philip/githome/teaql-rs/teaql-data-service" }
+teaql-runtime = { path = "/home/philip/githome/teaql-rs/teaql-runtime" }
+teaql-provider-linux = { path = "/home/philip/githome/teaql-rs/teaql-provider-linux" }
+linux-system-info-core = { path = "../rust-lib-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
