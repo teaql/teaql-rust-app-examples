@@ -10,3 +10,7 @@ teaql-runtime = { path = "/home/philip/githome/teaql-rs/teaql-runtime" }
 teaql-provider-linux = { path = "/home/philip/githome/teaql-rs/teaql-provider-linux" }
 linux-system-info-core = { path = "../rust-lib-core" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+ratatui = "0.29.0"
+crossterm = "0.28.1"
+chrono = "0.4"
+

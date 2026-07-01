@@ -4,6 +4,7 @@
 name = "fifa-world-cup-2026-service-workspace"
 version = "0.1.0"
 edition = "2021"
+default-run = "fifa-world-cup-2026-service-workspace"
 description = "Application workspace for the TeaQL domain crate fifa-world-cup-2026-service"
 license = "MIT OR Apache-2.0"
 
