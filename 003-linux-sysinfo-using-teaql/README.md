@@ -37,9 +37,9 @@ Beyond just a simple console printout, combining `teaql-provider-linux` with Tea
 4. **Security & Auditing**: Continuously query the system for unexpected or unauthorized processes based on complex criteria (e.g., specific command-line arguments, user IDs, or unexpected thread counts).
 5. **Cross-Platform Abstractions**: You can swap out `teaql-provider-linux` with other platform-specific providers in the future without changing your core business logic or TeaQL queries.
 
-## Expressive API Examples (`Q::` and `Expr`)
+## Expressive API Examples (`Q::` fluent builders)
 
-Because this example uses the **TeaQL Code Generator**, you don't need to write raw SQL or complex `/proc` parsing logic. Instead, you get a fully type-safe, fluent API using the `Q::` (Query Builder) and `Expr` (Expression/Condition) APIs.
+Because this example uses the **TeaQL Code Generator**, you don't need to write raw SQL or complex `/proc` parsing logic. Instead, you get a fully type-safe, fluent API using the `Q::` Query Builder APIs.
 
 ### Basic Querying with `Q::`
 
@@ -61,21 +61,18 @@ for p in top_memory_procs {
 }
 ```
 
-### Advanced Filtering with `Expr`
+### Advanced Filtering
 
-For more complex filters, you can use the `Expr` (Expression) API to build rich logical conditions using `and`, `or`, and custom predicates:
+For more complex scenarios, you can chain multiple strongly-typed `with_` methods. These generated methods combine using logical `AND` automatically, keeping your code type-safe and highly readable:
 
 ```rust
 use linux_system_info_core::Q;
-use linux_system_info_core::teaql_core::expr::Expr;
 
 // Find potentially rogue background processes
 let rogue_procs = Q::processes()
-    .filter(
-        Expr::gt("memory_rss_kb", 1024_000_i64) // Over 1GB memory
-            .and(Expr::gt("cpu_user_ticks", 1000_i64)) // High CPU usage
-            .and(Expr::eq("state", "S")) // Currently sleeping
-    )
+    .with_memory_rss_kb_greater_than(1024_000_i64) // Over 1GB memory
+    .with_cpu_user_ticks_greater_than(1000_i64) // High CPU usage
+    .with_state_is("S".to_string()) // Currently sleeping
     .execute_for_list(&ctx)
     .await?;
 ```
