@@ -82,7 +82,7 @@ let rogue_procs = Q::processes()
 You can easily query an entity, fetch its nested relations, and even run aggregations (facets) all in a single elegant query tree. The following example fetches the current `SystemInfo` (like hostname and memory), retrieves the top 50 memory-consuming processes belonging to it, and simultaneously groups (facets) all processes by their `state`:
 
 ```rust
-use linux_system_info_core::Q;
+use linux_system_info_core::{Q, E};
 
 // One complex query to fetch system info, its top processes, and process state statistics
 let sys_info = Q::system_infos()
@@ -99,9 +99,11 @@ let sys_info = Q::system_infos()
     .execute_for_one(&ctx)
     .await?;
 
-// Print System Info
-println!("Hostname: {}", sys_info.hostname());
-println!("Total Memory: {} bytes", sys_info.memory_total_bytes());
+// Print System Info using E:: (Expression) evaluation
+let hostname = E::system_info(&sys_info).get_hostname().eval();
+let mem_total = E::system_info(&sys_info).get_memory_total_bytes().eval();
+println!("Hostname: {}", hostname);
+println!("Total Memory: {} bytes", mem_total);
 
 // Print the Faceted Statistics (Group By State)
 println!("\nProcess State Breakdown:");
@@ -113,11 +115,15 @@ if let Some(state_stats) = sys_info.process_list().facets.get("state_stats") {
     }
 }
 
-// Print the Top 50 Processes
+// Print the Top 50 Processes using E:: evaluation
 println!("\nTop 50 Processes by Memory:");
 for p in sys_info.process_list().data.iter() {
-    println!("PID: {} | State: {} | Mem: {} KB | Name: {}", 
-        p.pid(), p.state(), p.memory_rss_kb(), p.name());
+    let pid = E::process(p).get_pid().eval();
+    let state = E::process(p).get_state().eval();
+    let mem = E::process(p).get_memory_rss_kb().eval();
+    let name = E::process(p).get_name().eval();
+
+    println!("PID: {} | State: {} | Mem: {} KB | Name: {}", pid, state, mem, name);
 }
 ```
 
