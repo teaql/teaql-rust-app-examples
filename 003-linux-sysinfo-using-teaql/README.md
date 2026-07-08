@@ -77,4 +77,48 @@ let rogue_procs = Q::processes()
     .await?;
 ```
 
+### Complex Relational Query with Facets
+
+You can easily query an entity, fetch its nested relations, and even run aggregations (facets) all in a single elegant query tree. The following example fetches the current `SystemInfo` (like hostname and memory), retrieves the top 50 memory-consuming processes belonging to it, and simultaneously groups (facets) all processes by their `state`:
+
+```rust
+use linux_system_info_core::Q;
+
+// One complex query to fetch system info, its top processes, and process state statistics
+let sys_info = Q::system_infos()
+    // 1. Nested query: Fetch the top 50 processes by memory
+    .select_process_with(
+        Q::processes()
+            .order_by_memory_rss_kb_desc()
+            .limit(50)
+    )
+    // 2. Facet (Group By): Aggregate process counts by their state
+    .facet_process_with(
+        Q::processes().facet_by_state_as("state_stats", Q::query_selection())
+    )
+    .execute_for_one(&ctx)
+    .await?;
+
+// Print System Info
+println!("Hostname: {}", sys_info.hostname());
+println!("Total Memory: {} bytes", sys_info.memory_total_bytes());
+
+// Print the Faceted Statistics (Group By State)
+println!("\nProcess State Breakdown:");
+if let Some(state_stats) = sys_info.process_list().facets.get("state_stats") {
+    for record in &state_stats.data {
+        let state = record.get("state").unwrap().as_str().unwrap_or("Unknown");
+        let count = record.get("count").unwrap().as_i64().unwrap_or(0);
+        println!("State '{}': {} processes", state, count);
+    }
+}
+
+// Print the Top 50 Processes
+println!("\nTop 50 Processes by Memory:");
+for p in sys_info.process_list().data.iter() {
+    println!("PID: {} | State: {} | Mem: {} KB | Name: {}", 
+        p.pid(), p.state(), p.memory_rss_kb(), p.name());
+}
+```
+
 These generated APIs guarantee compile-time safety and make navigating system data as easy as querying a local database!
