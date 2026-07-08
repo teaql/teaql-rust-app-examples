@@ -127,7 +127,7 @@ pub async fn generate_sample_data<C>(
     plan: SampleDataPlan,
 ) -> Result<SampleDataReport, String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     log::info!("Starting sample data generation. Scale: {:?}, Seed: {}", plan.scale, plan.seed);
     let mut state = SampleDataState::new(plan);
@@ -142,37 +142,37 @@ where
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_match_groups(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_tournament_teams(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_group_standings(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_tournament_matches(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_match_cards(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
     ctx.user_context().transaction_data(|| async {
         Box::pin(generate_match_goals(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(e))
+            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
         })
     }).await.map_err(|e| e.to_string())?;
 
@@ -187,7 +187,7 @@ async fn load_root_tournaments<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::tournaments().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -201,7 +201,7 @@ async fn load_constant_card_categories<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::card_categories().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -215,7 +215,7 @@ async fn load_constant_confederations<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::confederations().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -229,7 +229,7 @@ async fn load_constant_goal_categories<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::goal_categories().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -243,7 +243,7 @@ async fn load_constant_match_stages<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::match_stages().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -257,7 +257,7 @@ async fn load_constant_match_statuses<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
     let list = Q::match_statuses().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
     for item in list {
@@ -271,7 +271,7 @@ async fn generate_match_groups<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Tournament").is_empty() {
             state.record_skipped("Match Group", "Required dependency Tournament is missing in reference pool".to_string());
@@ -338,7 +338,7 @@ async fn generate_tournament_teams<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Confederation").is_empty() {
             state.record_skipped("Tournament Team", "Required dependency Confederation is missing in reference pool".to_string());
@@ -431,7 +431,7 @@ async fn generate_group_standings<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Tournament Team").is_empty() {
             state.record_skipped("Group Standing", "Required dependency Tournament Team is missing in reference pool".to_string());
@@ -573,7 +573,7 @@ async fn generate_tournament_matches<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Tournament Team").is_empty() {
             state.record_skipped("Tournament Match", "Required dependency Tournament Team is missing in reference pool".to_string());
@@ -752,7 +752,7 @@ async fn generate_match_cards<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Tournament Match").is_empty() {
             state.record_skipped("Match Card", "Required dependency Tournament Match is missing in reference pool".to_string());
@@ -860,7 +860,7 @@ async fn generate_match_goals<C>(
     state: &mut SampleDataState,
 ) -> Result<(), String>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized + crate::TeaqlDataServiceProvider,
 {
         if state.ids("Tournament Match").is_empty() {
             state.record_skipped("Match Goal", "Required dependency Tournament Match is missing in reference pool".to_string());

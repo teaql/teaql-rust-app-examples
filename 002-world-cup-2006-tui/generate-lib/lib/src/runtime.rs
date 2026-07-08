@@ -204,8 +204,8 @@ async fn connect_data_service_pool(config: &ServiceRuntimeConfig) -> Result<Data
     Ok(std::sync::Arc::new(std::sync::Mutex::new(rusqlite::Connection::open(pure_file_path).map_err(|e| ServiceRuntimeError::ConnectionError(e.to_string()))?)))
 }
 
-pub fn repository_registry() -> teaql_runtime::InMemoryRepositoryRegistry {
-    teaql_runtime::InMemoryRepositoryRegistry::new()
+pub fn data_service_registry() -> teaql_runtime::InMemoryEntityRegistry {
+    teaql_runtime::InMemoryEntityRegistry::new()
         .with_entity("MatchStage")
         .with_entity("MatchStatus")
         .with_entity("GoalCategory")
@@ -220,8 +220,8 @@ pub fn repository_registry() -> teaql_runtime::InMemoryRepositoryRegistry {
         .with_entity("GroupStanding")
 }
 
-pub fn behavior_registry() -> teaql_runtime::InMemoryRepositoryBehaviorRegistry {
-    teaql_runtime::InMemoryRepositoryBehaviorRegistry::new()
+pub fn behavior_registry() -> teaql_runtime::InMemoryEntityDataServiceBehaviorRegistry {
+    teaql_runtime::InMemoryEntityDataServiceBehaviorRegistry::new()
         .with_behavior("MatchStage", MatchStageBehavior::default())
         .with_behavior("MatchStatus", MatchStatusBehavior::default())
         .with_behavior("GoalCategory", GoalCategoryBehavior::default())

@@ -1,6 +1,6 @@
-use teaql_runtime::RepositoryBehavior;
+use teaql_runtime::EntityDataServiceBehavior;
 
 #[derive(Clone, Debug, Default)]
 pub struct MatchGroupBehavior;
 
-impl RepositoryBehavior for MatchGroupBehavior {}
+impl EntityDataServiceBehavior for MatchGroupBehavior {}

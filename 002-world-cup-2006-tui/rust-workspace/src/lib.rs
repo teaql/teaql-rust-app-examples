@@ -6,6 +6,8 @@
 
 pub use fifa_world_cup_2026_service::{teaql_core, E, Q};
 
+pub mod worldcup_rules;
+
 pub fn generated_domain_crate() -> &'static str {
     "fifa-world-cup-2026-service"
 }

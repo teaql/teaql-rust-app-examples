@@ -1,6 +1,6 @@
-use teaql_runtime::RepositoryBehavior;
+use teaql_runtime::EntityDataServiceBehavior;
 
 #[derive(Clone, Debug, Default)]
 pub struct TournamentBehavior;
 
-impl RepositoryBehavior for TournamentBehavior {}
+impl EntityDataServiceBehavior for TournamentBehavior {}

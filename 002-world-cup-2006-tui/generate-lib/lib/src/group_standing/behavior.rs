@@ -1,6 +1,6 @@
-use teaql_runtime::RepositoryBehavior;
+use teaql_runtime::EntityDataServiceBehavior;
 
 #[derive(Clone, Debug, Default)]
 pub struct GroupStandingBehavior;
 
-impl RepositoryBehavior for GroupStandingBehavior {}
+impl EntityDataServiceBehavior for GroupStandingBehavior {}

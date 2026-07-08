@@ -543,14 +543,18 @@ impl GroupStanding {
     pub(crate) async fn save<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<teaql_runtime::GraphNode, crate::TeaqlRepositoryError<C::GroupStandingRepository<'a>>>
+    ) -> Result<teaql_runtime::GraphNode, crate::TeaqlDataServiceError<C::GroupStandingDataService<'a>>>
     where
-        C: crate::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlDataServiceProvider + ?Sized,
     {
-        let repository = ctx
-            .group_standing_repository()
-            .map_err(|err| teaql_runtime::RepositoryError::Runtime(teaql_runtime::RuntimeError::Graph(err.to_string())))?;
-        crate::TeaqlEntityRepository::save_entity_graph(&repository, self).await
+        let data_service = ctx
+            .group_standing_data_service()
+            .map_err(|err| teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(err.to_string())))?;
+        let result = crate::TeaqlEntityDataService::save_entity_graph(&data_service, self).await;
+        if result.is_ok() {
+            ctx.user_context().entity_root().clear_current_change_set();
+        }
+        result
     }
 }
 

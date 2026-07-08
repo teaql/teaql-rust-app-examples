@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
 use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
-use teaql_runtime::{RepositoryError, RuntimeError};
+use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
 
@@ -96,24 +96,24 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<SmartList<R>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
-            .tournament_team_repository()
-            .map_err(|err| RepositoryError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let data_service = ctx
+            .tournament_team_data_service()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
+        let mut rows = data_service.fetch_enhanced_entities_with_relation_aggregates::<R>(
             &query,
             &relation_aggregates,
         ).await?;
         let facets = execute_facets(ctx, &query, &query_options)
             .await
-            .map_err(RepositoryError::Runtime)?;
+            .map_err(DataServiceError::Runtime)?;
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
@@ -121,16 +121,16 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
     {
-        let repository = ctx
-            .tournament_team_repository()
-            .map_err(|err| RepositoryError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let data_service = ctx
+            .tournament_team_data_service()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let query = apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
-        let chunks = repository.fetch_stream(&query)
+        let chunks = data_service.fetch_stream(&query)
             .await?;
         Ok(chunks)
     }
@@ -138,9 +138,9 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<Option<R>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
         R: teaql_core::Entity,
     {
         let rows = self.limit(1)._execute_for_list(ctx).await?;
@@ -150,9 +150,9 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<Option<R>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
         R: teaql_core::Entity,
     {
         self._execute_for_first(ctx).await
@@ -164,9 +164,9 @@ impl<R> TournamentTeamRequest<R> {
         ctx: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<SmartList<R>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
         R: teaql_core::Entity,
     {
         let total_count = self.clone()._execute_for_count(ctx).await?;
@@ -178,13 +178,13 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<u64, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<u64, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
     {
-        let repository = ctx
-            .tournament_team_repository()
-            .map_err(|err| RepositoryError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let data_service = ctx
+            .tournament_team_data_service()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query;
         query.projection.clear();
         query.expr_projection.clear();
@@ -192,47 +192,47 @@ impl<R> TournamentTeamRequest<R> {
         query.slice = None;
         query.relations.clear();
         query = query.count(COUNT_ALIAS);
-        let rows = repository.fetch_all(&query).await?;
+        let rows = data_service.fetch_all(&query).await?;
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| RepositoryError::Runtime(RuntimeError::Graph(format!("count result for TournamentTeam is missing or not numeric"))))
+            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for TournamentTeam is missing or not numeric"))))
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<bool, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<bool, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
     {
-        let repository = ctx
-            .tournament_team_repository()
-            .map_err(|err| RepositoryError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let data_service = ctx
+            .tournament_team_data_service()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
         query.relations.clear();
-        let rows = repository.fetch_all(&query).await?;
+        let rows = data_service.fetch_all(&query).await?;
         Ok(!rows.is_empty())
     }
 
     pub(crate) async fn _execute_for_records<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
     {
-        let repository = ctx
-            .tournament_team_repository()
-            .map_err(|err| RepositoryError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let data_service = ctx
+            .tournament_team_data_service()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let outer_query = self.query.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
+        let mut rows = data_service.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
         let facets = execute_facets(ctx, &outer_query, &query_options)
             .await
-            .map_err(RepositoryError::Runtime)?;
+            .map_err(DataServiceError::Runtime)?;
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
@@ -240,9 +240,9 @@ impl<R> TournamentTeamRequest<R> {
     pub(crate) async fn _execute_for_record<'a, C>(
         self,
         ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    ) -> Result<Option<Record>, TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlDataServiceProvider + ?Sized,
     {
         let records = self.limit(1)._execute_for_records(ctx).await?;
         Ok(records.into_iter().next())
@@ -5492,9 +5492,9 @@ impl<R> From< TournamentTeamRequest<R> > for QuerySelection {
 
 
 impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::TournamentTeam> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+where C: crate::request_support::TeaqlDataServiceProvider + ?Sized + 'a
 {
-    type Error = crate::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>;
+    type Error = crate::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>;
     fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
         Box::pin(async move { self.into_entity().save(ctx).await })
     }
@@ -5517,9 +5517,9 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<TournamentTeamRequest<R>> {
         self.inner
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_list(ctx).await
     }
@@ -5527,45 +5527,45 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<TournamentTeamRequest<R>> {
     /// Execute query in streaming mode (chunked).
     /// Returns a Vec of StreamChunk, each containing up to chunk_size rows.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_stream(ctx).await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_first(ctx).await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_one(ctx).await
     }
 
 
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_records(ctx).await
     }
 
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_record(ctx).await
     }
 
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlRepositoryError<C::TournamentTeamRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::TournamentTeamDataService<'a>>>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::request_support::TeaqlDataServiceProvider + ?Sized,
     {
         self.into_inner_with_trace()._execute_for_count(ctx).await
     }
