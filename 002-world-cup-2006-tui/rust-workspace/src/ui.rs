@@ -243,8 +243,8 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 
         // Col 0: R32 match
         // Emoji flags render ~1 col wider per flag in terminals than unicode-width reports.
-        // Match rows have 2 flags, so blank rows need extra padding to keep connectors aligned.
-        const FLAG_OFFSET: usize = 1;
+        // Match rows have 2 flags → blank rows need +2 extra padding to keep connectors aligned.
+        const FLAG_OFFSET: usize = 2;
         let mi = r / 2;
         if r % 2 == 0 && mi < r32.len() {
             let (text, style) = fmt_match(r32[mi], col0_w);
