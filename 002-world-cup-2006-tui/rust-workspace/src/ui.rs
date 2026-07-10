@@ -207,12 +207,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     let rest = avail.saturating_sub(col0_w + cw * 2 + 2);
     let sw = (rest / 3).max(4).min(12);
 
-    // Format match line using 3-letter codes: "CAN 1-0 RSA"
-    // (Emoji flags cause width inconsistencies across terminals, breaking connector alignment)
+    // Format match line using flag emojis: "🇨🇦 1-0 🇿🇦"
     let fmt_match = |m: &KnockoutMatchView, w: usize| -> (String, Style) {
-        let h = team_short(&m.home);
-        let a = team_short(&m.away);
-        let text = format!("{:>3} {} {:<3}", h, m.score, a);
+        let h = team_flag(&m.home);
+        let a = team_flag(&m.away);
+        let text = format!("{} {} {}", h, m.score, a);
         let style = if m.completed {
             Style::default().fg(Color::Green)
         } else {
@@ -243,12 +242,15 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         let mut spans: Vec<Span> = Vec::new();
 
         // Col 0: R32 match
+        // Emoji flags render slightly wider in terminals than unicode-width reports.
+        // Match rows have 2 flags → blank rows need +1 extra padding to keep connectors aligned.
+        const FLAG_OFFSET: usize = 1;
         let mi = r / 2;
         if r % 2 == 0 && mi < r32.len() {
             let (text, style) = fmt_match(r32[mi], col0_w);
             spans.push(Span::styled(text, style));
         } else {
-            spans.push(Span::raw(" ".repeat(col0_w)));
+            spans.push(Span::raw(" ".repeat(col0_w + FLAG_OFFSET)));
         }
 
         spans.push(Span::raw("  "));
