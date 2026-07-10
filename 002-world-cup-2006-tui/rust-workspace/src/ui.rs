@@ -177,8 +177,9 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         }
     }).collect();
     // SF column: show "? date" when QF winner is unknown
-    // QF[0]+QF[1]→SF1 7/14, QF[2]+QF[3]→SF2 7/15
-    let sf_dates = ["7/14", "7/14", "7/15", "7/15"];
+    // Date = when QF match finishes (determines who advances to SF)
+    // QF M97=7/9, M98=7/10, M99=7/11, M100=7/11
+    let sf_dates = ["7/9", "7/10", "7/11", "7/11"];
     let col3_names: Vec<String> = qf.iter().enumerate().map(|(i, m)| {
         match &m.winner {
             Some(w) => team_short(w),
