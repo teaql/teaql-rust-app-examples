@@ -34,7 +34,6 @@ impl HttpBuilder {
 #[derive(Debug, Clone)]
 pub enum View {
     Global,
-    Group(String),
     Players,
     Logs,
 }
@@ -59,14 +58,9 @@ pub struct App {
     pub ctx: UserContext,
 
     // Cached data
-    pub global_standings: Vec<GroupStanding>,
     pub knockout_matches: Vec<KnockoutMatchView>,
     pub top_players: Vec<(String, String, i32)>, // (Team, Player, Goals)
     pub recent_matches: Vec<TournamentMatch>,
-
-    pub group_standings: Vec<GroupStanding>,
-    pub group_players: Vec<(String, String, i32)>,
-    pub group_matches: Vec<TournamentMatch>,
 
     pub all_players: Vec<(String, String, i32, Vec<String>)>, // Team, Player, Goals, Matches
 
@@ -86,13 +80,9 @@ impl App {
             logs,
             should_quit: false,
             ctx,
-            global_standings: vec![],
             knockout_matches: vec![],
             top_players: vec![],
             recent_matches: vec![],
-            group_standings: vec![],
-            group_players: vec![],
-            group_matches: vec![],
             all_players: vec![],
             global_table_state: TableState::default(),
             player_table_state: TableState::default(),
@@ -114,19 +104,8 @@ impl App {
     }
 
     pub async fn fetch_data(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.recalculate_all_standings().await?;
         match &self.view {
             View::Global => {
-                self.global_standings = Q::group_standings()
-                    .select_tournament_team_with(Q::tournament_teams().select_self())
-                    .select_match_group_with(Q::match_groups().select_self())
-                    .comment("Fetch global standings")
-                    .purpose("Render global standings dashboard")
-                    .execute_for_list(&self.ctx)
-                    .await?
-                    .data;
-
-                Self::sort_standings(&mut self.global_standings);
                 self.knockout_matches = self.fetch_knockout_matches().await?;
 
                 let goals = Q::match_goals()
@@ -170,68 +149,6 @@ impl App {
                             .is_some()
                 });
                 self.recent_matches.dedup_by_key(|m| m.id());
-            }
-            View::Group(g_letter) => {
-                let g_opt = Q::match_groups()
-                    .with_group_letter_is(g_letter.as_str())
-                    .comment("Find group by letter")
-                    .purpose("Render group dashboard")
-                    .execute_for_list(&self.ctx)
-                    .await?
-                    .data
-                    .pop();
-                if let Some(g) = g_opt {
-                    self.group_standings = Q::group_standings()
-                        .select_tournament_team_with(Q::tournament_teams().select_self())
-                        .select_match_group_with(Q::match_groups().select_self())
-                        .with_match_group_matching(Q::match_groups().with_id_is(g.id()))
-                        .comment("Fetch group standings")
-                        .purpose("Render group standings dashboard")
-                        .execute_for_list(&self.ctx)
-                        .await?
-                        .data;
-
-                    Self::sort_standings(&mut self.group_standings);
-
-                    let goals = Q::match_goals()
-                        .select_tournament_team_with(
-                            Q::tournament_teams().with_group_letter_is(g_letter.as_str()),
-                        )
-                        .comment("Fetch group goals")
-                        .purpose("Render group top players dashboard")
-                        .execute_for_list(&self.ctx)
-                        .await?
-                        .data;
-
-                    let mut players_map = std::collections::HashMap::new();
-                    for goal in goals {
-                        if let Some(team) = goal.tournament_team() {
-                            let t_name = format!("{} {}", team.emoji_flag(), team.team_name());
-                            let p_name = goal.player_name().to_string();
-                            *players_map.entry((t_name, p_name)).or_insert(0) += 1;
-                        }
-                    }
-                    let mut tp: Vec<_> = players_map
-                        .into_iter()
-                        .map(|((t, p), c)| (t, p, c))
-                        .collect();
-                    tp.sort_by_key(|b| std::cmp::Reverse(b.2));
-                    self.group_players = tp;
-
-                    self.group_matches = Q::tournament_matches()
-                        .with_match_group_matching(Q::match_groups().with_id_is(g.id()))
-                        .select_home_team_with(Q::tournament_teams().select_self())
-                        .select_away_team_with(Q::tournament_teams().select_self())
-                        .order_by_id_desc()
-                        .comment("Fetch group matches")
-                        .purpose("Render group matches dashboard")
-                        .execute_for_list(&self.ctx)
-                        .await?
-                        .data;
-                    self.group_matches
-                        .retain(|m| m.home_score() != 0 || m.away_score() != 0);
-                    self.group_matches.dedup_by_key(|m| m.id());
-                }
             }
             View::Players => {
                 let goals = Q::match_goals()
@@ -335,126 +252,109 @@ impl App {
             })
             .collect();
 
-        if result.is_empty() {
-            result = Self::projected_knockout_matches_from_standings(&self.global_standings);
+        // Deduplicate by match label: if fix_data created a real match with
+        // the same match_number as a seed match, keep the later one
+        // (fix_data entries have higher IDs and appear later in the list).
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (i, m) in result.iter().enumerate() {
+            let entry = seen.entry(m.label.clone()).or_insert(i);
+            // Always prefer later entries (fix_data corrections come after seed)
+            *entry = i;
         }
+        let keep: std::collections::HashSet<usize> = seen.values().copied().collect();
+        let mut deduped: Vec<KnockoutMatchView> = result
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| keep.contains(i))
+            .map(|(_, m)| m)
+            .collect();
 
-        result.sort_by(|a, b| {
+        deduped.sort_by(|a, b| {
             a.stage_rank
                 .cmp(&b.stage_rank)
                 .then_with(|| a.label.cmp(&b.label))
         });
-        Ok(result)
-    }
 
-    fn projected_knockout_matches_from_standings(
-        standings: &[GroupStanding],
-    ) -> Vec<KnockoutMatchView> {
-        let mut sorted = standings.to_vec();
-        Self::sort_standings(&mut sorted);
+        // Reorder within each stage to match bracket structure:
+        // QF stays sorted by label. R16 is reordered so that for each QF,
+        // the two R16 matches whose winners are the QF participants are adjacent.
+        // R32 is similarly reordered based on R16 participants.
+        use crate::ui::team_short;
 
-        let mut group_winners: Vec<(String, String)> = Vec::new();
-        let mut group_runners: Vec<(String, String)> = Vec::new();
-        let mut third_place: Vec<(String, String, i32, i32, i32)> = Vec::new();
-        let mut current_group = String::new();
-        let mut group_rank = 0_usize;
+        let mut by_stage: std::collections::BTreeMap<usize, Vec<KnockoutMatchView>> =
+            std::collections::BTreeMap::new();
+        for m in deduped {
+            by_stage.entry(m.stage_rank).or_default().push(m);
+        }
 
-        for standing in &sorted {
-            let group = E::group_standing(standing)
-                .get_match_group()
-                .eval()
-                .map(|g| g.group_letter().to_string())
-                .unwrap_or_else(|| "?".to_string());
-            if group != current_group {
-                current_group = group.clone();
-                group_rank = 0;
-            }
-            group_rank += 1;
+        let qf = by_stage.remove(&3).unwrap_or_default();
+        let r16_orig = by_stage.remove(&2).unwrap_or_default();
+        let r32_orig = by_stage.remove(&1).unwrap_or_default();
 
-            let team = E::group_standing(standing)
-                .get_tournament_team()
-                .eval()
-                .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
-                .unwrap_or_else(|| "TBD".to_string());
-
-            match group_rank {
-                1 => group_winners.push((group.clone(), team)),
-                2 => group_runners.push((group.clone(), team)),
-                3 => third_place.push((
-                    group.clone(),
-                    team,
-                    standing.points(),
-                    standing.goal_difference(),
-                    standing.goals_for(),
-                )),
-                _ => {}
+        // Reorder R16 by QF bracket
+        let mut r16: Vec<KnockoutMatchView> = Vec::new();
+        let mut r16_used = vec![false; r16_orig.len()];
+        for q in &qf {
+            for team in [&q.home, &q.away] {
+                let ts = team_short(team);
+                // First try: winner matches
+                let idx = r16_orig.iter().enumerate().position(|(i, m)| {
+                    !r16_used[i]
+                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                });
+                // Fallback: home/away matches
+                let idx = idx.or_else(|| {
+                    r16_orig.iter().enumerate().position(|(i, m)| {
+                        !r16_used[i]
+                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                    })
+                });
+                if let Some(idx) = idx {
+                    r16_used[idx] = true;
+                    r16.push(r16_orig[idx].clone());
+                }
             }
         }
-
-        // Sort third-place teams by strength to determine which 8 qualify
-        third_place.sort_by(|a, b| {
-            b.2.cmp(&a.2)
-                .then(b.3.cmp(&a.3))
-                .then(b.4.cmp(&a.4))
-                .then(a.0.cmp(&b.0))
-        });
-        let qualified_thirds: Vec<(String, String)> =
-            third_place.into_iter().take(8).map(|(g, t, _, _, _)| (g, t)).collect();
-
-        // FIFA 48-team bracket: assign all 32 teams to positions 4..35
-        // Group winners: positions 4-15 (A=4, B=5, ..., L=15)
-        // Runners-up: positions 16-27 (A=16, B=17, ..., L=27)
-        // Third-place (qualified): positions 28-35 sorted by group letter
-        // Pairing: position i vs position (39 - i) for i = 4..19
-
-        fn group_offset(g: &str) -> usize {
-            g.chars()
-                .next()
-                .map(|c| (c as u8 - b'A') as usize)
-                .unwrap_or(0)
+        for (i, m) in r16_orig.into_iter().enumerate() {
+            if !r16_used[i] { r16.push(m); }
         }
 
-        let mut positions: std::collections::HashMap<usize, String> =
-            std::collections::HashMap::new();
-
-        // Group winners: positions 4..15
-        for (g, team) in &group_winners {
-            positions.insert(4 + group_offset(g), format!("{}{}", g, team));
+        // Reorder R32 by R16 bracket
+        let mut r32: Vec<KnockoutMatchView> = Vec::new();
+        let mut r32_used = vec![false; r32_orig.len()];
+        for r in &r16 {
+            for team in [&r.home, &r.away] {
+                let ts = team_short(team);
+                let idx = r32_orig.iter().enumerate().position(|(i, m)| {
+                    !r32_used[i]
+                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                });
+                let idx = idx.or_else(|| {
+                    r32_orig.iter().enumerate().position(|(i, m)| {
+                        !r32_used[i]
+                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                    })
+                });
+                if let Some(idx) = idx {
+                    r32_used[idx] = true;
+                    r32.push(r32_orig[idx].clone());
+                }
+            }
         }
-        // Runners-up: positions 16..27
-        for (g, team) in &group_runners {
-            positions.insert(16 + group_offset(g), format!("{}{}", g, team));
-        }
-        // Third-place (qualified): positions 28..35
-        for (idx, (g, team)) in qualified_thirds.iter().enumerate() {
-            positions.insert(28 + idx, format!("{}{}", g, team));
-        }
-
-        let mut result = Vec::new();
-        for i in 0..16 {
-            let home_pos = 4 + i;
-            let away_pos = 35usize.saturating_sub(i);
-            let home = positions
-                .get(&home_pos)
-                .cloned()
-                .unwrap_or_else(|| "TBD".to_string());
-            let away = positions
-                .get(&away_pos)
-                .cloned()
-                .unwrap_or_else(|| "TBD".to_string());
-            result.push(KnockoutMatchView {
-                stage: "Round of 32",
-                stage_rank: 1,
-                label: format!("R32-{:02}", i + 1),
-                home,
-                away,
-                score: "vs".to_string(),
-                winner: None,
-                completed: false,
-            });
+        for (i, m) in r32_orig.into_iter().enumerate() {
+            if !r32_used[i] { r32.push(m); }
         }
 
-        result
+        // Reassemble in order: R32, R16, QF, then remaining stages (SF, 3rd, Final)
+        let mut final_result = Vec::new();
+        final_result.extend(r32);
+        final_result.extend(r16);
+        final_result.extend(qf);
+        for (_, ms) in by_stage {
+            final_result.extend(ms);
+        }
+
+        Ok(final_result)
     }
 
     fn knockout_match_view(
@@ -471,7 +371,8 @@ impl App {
             .away_team()
             .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
             .unwrap_or_else(|| "TBD".to_string());
-        let completed = m.home_score() != 0 || m.away_score() != 0;
+        let completed = m.home_score() != 0 || m.away_score() != 0
+            || m.penalty_home() != 0 || m.penalty_away() != 0;
         let mut score = if completed {
             format!("{} - {}", m.home_score(), m.away_score())
         } else {
@@ -584,13 +485,9 @@ impl App {
             return;
         }
 
-        if cmd.eq_ignore_ascii_case("global") {
+        if cmd.eq_ignore_ascii_case("global") || cmd.eq_ignore_ascii_case("bracket") {
             self.view = View::Global;
-            self.log("Switched to Global View");
-        } else if cmd.starts_with("group ") {
-            let letter = cmd.trim_start_matches("group ").trim().to_uppercase();
-            self.view = View::Group(letter.clone());
-            self.log(&format!("Switched to Group {} View", letter));
+            self.log("Switched to Knockout Bracket View");
         } else if cmd == "players" {
             self.view = View::Players;
             self.log("Switched to Players View");
@@ -606,7 +503,7 @@ impl App {
             }
         } else {
             self.log(
-                "Unknown command. Try: global, group A, team BRA, player Vinicius, sync live, quit",
+                "Unknown command. Try: bracket, players, sync live, logs, quit",
             );
         }
 
@@ -840,8 +737,6 @@ impl App {
             new_as
         ));
 
-        self.recalculate_all_standings().await?;
-
         self.clear_pending_changes();
         Ok(())
     }
@@ -865,236 +760,6 @@ impl App {
         Ok(())
     }
 
-    async fn update_group_standing(
-        &self,
-        standing: &GroupStanding,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let data_service = self
-            .ctx
-            .entity_data_service::<DataServiceExecutor>("GroupStanding")?;
-        let cmd = UpdateCommand::new("GroupStanding", standing.id())
-            .value("played", standing.played())
-            .value("won", standing.won())
-            .value("drawn", standing.drawn())
-            .value("lost", standing.lost())
-            .value("goals_for", standing.goals_for())
-            .value("goals_against", standing.goals_against())
-            .value("goal_difference", standing.goal_difference())
-            .value("points", standing.points())
-            .value("version", standing.version() + 1);
-        data_service.update(&cmd).await?;
-        Ok(())
-    }
-
-    async fn recalculate_all_standings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let teams = Q::tournament_teams()
-            .comment("Fetch all teams")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data;
-        let matches = Q::tournament_matches()
-            .comment("Fetch all matches")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data;
-        let match_groups = Q::match_groups()
-            .comment("Fetch match groups")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data;
-        let statuses = Q::match_statuses()
-            .comment("Fetch all match statuses")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data;
-        let scheduled_id = statuses
-            .iter()
-            .find(|s| s.code() == "SCHEDULED")
-            .map(|s| s.id())
-            .unwrap_or(0);
-        let postponed_id = statuses
-            .iter()
-            .find(|s| s.code() == "POSTPONED")
-            .map(|s| s.id())
-            .unwrap_or(0);
-        let mut standings = Q::group_standings()
-            .comment("Fetch all group standings")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data;
-        let match_ids_with_goals: std::collections::HashSet<u64> = Q::match_goals()
-            .comment("Fetch match goals for completed match detection")
-            .purpose("Recalculate all standings")
-            .execute_for_list(&self.ctx)
-            .await?
-            .data
-            .into_iter()
-            .map(|g| g.tournament_match_id())
-            .collect();
-
-        self.clear_pending_changes();
-
-        let team_groups: std::collections::HashMap<u64, String> = teams
-            .iter()
-            .map(|team| (team.id(), team.group_letter()))
-            .collect();
-        let group_ids: std::collections::HashMap<String, u64> = match_groups
-            .iter()
-            .map(|group| (group.group_letter(), group.id()))
-            .collect();
-
-        for team in teams {
-            let team_id = team.id();
-            let mut played = 0;
-            let mut won = 0;
-            let mut drawn = 0;
-            let mut lost = 0;
-            let mut gf = 0;
-            let mut ga = 0;
-
-            for m in &matches {
-                if !match_ids_with_goals.contains(&m.id()) {
-                    continue;
-                }
-                if m.match_status_id() == scheduled_id || m.match_status_id() == postponed_id {
-                    continue;
-                }
-                if !Self::is_group_stage_match(m, &team_groups, &group_ids) {
-                    continue;
-                }
-                let hs = m.home_score();
-                let as_sc = m.away_score();
-                if m.home_team_id() == team_id {
-                    played += 1;
-                    gf += hs;
-                    ga += as_sc;
-                    if hs > as_sc {
-                        won += 1;
-                    } else if hs == as_sc {
-                        drawn += 1;
-                    } else {
-                        lost += 1;
-                    }
-                } else if m.away_team_id() == team_id {
-                    played += 1;
-                    gf += as_sc;
-                    ga += hs;
-                    if as_sc > hs {
-                        won += 1;
-                    } else if as_sc == hs {
-                        drawn += 1;
-                    } else {
-                        lost += 1;
-                    }
-                }
-            }
-
-            let standing = standings
-                .iter_mut()
-                .find(|s| s.tournament_team_id() == team_id);
-            if let Some(s) = standing {
-                let new_points = (won * 3) + drawn;
-                let new_gd = gf - ga;
-                if s.played() != played
-                    || s.won() != won
-                    || s.drawn() != drawn
-                    || s.lost() != lost
-                    || s.goals_for() != gf
-                    || s.goals_against() != ga
-                    || s.points() != new_points
-                    || s.goal_difference() != new_gd
-                {
-                    let old_pts = s.points();
-                    let old_gd = s.goal_difference();
-                    s.update_played(played);
-                    s.update_won(won);
-                    s.update_drawn(drawn);
-                    s.update_lost(lost);
-                    s.update_goals_for(gf);
-                    s.update_goals_against(ga);
-                    s.update_goal_difference(gf - ga);
-                    s.update_points((won * 3) + drawn);
-                    self.update_group_standing(s).await?;
-                    self.log(&format!(
-                        "Recalculated standing for {}: Pts {}->{}, GD {}->{}",
-                        team.team_name(),
-                        old_pts,
-                        s.points(),
-                        old_gd,
-                        s.goal_difference()
-                    ));
-                }
-            } else {
-                self.log(&format!(
-                    "Error: Team '{}' (ID: {}) has no GroupStanding record. Skipping...",
-                    team.team_name(),
-                    team_id
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    fn is_group_stage_match(
-        m: &TournamentMatch,
-        team_groups: &std::collections::HashMap<u64, String>,
-        group_ids: &std::collections::HashMap<String, u64>,
-    ) -> bool {
-        let Some(home_group) = team_groups.get(&m.home_team_id()) else {
-            return false;
-        };
-        let Some(away_group) = team_groups.get(&m.away_team_id()) else {
-            return false;
-        };
-        if home_group != away_group {
-            return false;
-        }
-
-        group_ids
-            .get(home_group)
-            .map(|group_id| *group_id == m.match_group_id())
-            .unwrap_or(false)
-    }
-
-    fn sort_standings(standings: &mut [GroupStanding]) {
-        standings.sort_by(|a, b| {
-            let a_group = E::group_standing(a)
-                .get_match_group()
-                .eval()
-                .map(|g| g.group_letter().to_string())
-                .unwrap_or_default();
-            let b_group = E::group_standing(b)
-                .get_match_group()
-                .eval()
-                .map(|g| g.group_letter().to_string())
-                .unwrap_or_default();
-
-            a_group
-                .cmp(&b_group)
-                .then(b.points().cmp(&a.points()))
-                .then(b.goal_difference().cmp(&a.goal_difference()))
-                .then(b.goals_for().cmp(&a.goals_for()))
-                .then({
-                    let a_name = E::group_standing(a)
-                        .get_tournament_team()
-                        .eval()
-                        .map(|t| t.team_name().to_string())
-                        .unwrap_or_default();
-                    let b_name = E::group_standing(b)
-                        .get_tournament_team()
-                        .eval()
-                        .map(|t| t.team_name().to_string())
-                        .unwrap_or_default();
-                    a_name.cmp(&b_name)
-                })
-        });
-    }
-
     pub fn next_pane(&mut self) {
         self.active_pane = (self.active_pane + 1) % 3;
     }
@@ -1109,13 +774,9 @@ impl App {
 
     pub fn next(&mut self) {
         match self.view {
-            View::Global | View::Group(_) => match self.active_pane {
+            View::Global => match self.active_pane {
                 0 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.knockout_matches.len()
-                    } else {
-                        self.group_standings.len()
-                    };
+                    let len = self.knockout_matches.len();
                     let i = match self.global_table_state.selected() {
                         Some(i) => {
                             if i >= len.saturating_sub(1) {
@@ -1129,11 +790,7 @@ impl App {
                     self.global_table_state.select(Some(i));
                 }
                 1 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.top_players.len()
-                    } else {
-                        self.group_players.len()
-                    };
+                    let len = self.top_players.len();
                     let i = match self.players_state.selected() {
                         Some(i) => {
                             if i >= len.saturating_sub(1) {
@@ -1147,11 +804,7 @@ impl App {
                     self.players_state.select(Some(i));
                 }
                 2 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.recent_matches.len()
-                    } else {
-                        self.group_matches.len()
-                    };
+                    let len = self.recent_matches.len();
                     let i = match self.matches_state.selected() {
                         Some(i) => {
                             if i >= len.saturating_sub(1) {
@@ -1198,13 +851,9 @@ impl App {
 
     pub fn previous(&mut self) {
         match self.view {
-            View::Global | View::Group(_) => match self.active_pane {
+            View::Global => match self.active_pane {
                 0 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.knockout_matches.len()
-                    } else {
-                        self.group_standings.len()
-                    };
+                    let len = self.knockout_matches.len();
                     let i = match self.global_table_state.selected() {
                         Some(i) => {
                             if i == 0 {
@@ -1218,11 +867,7 @@ impl App {
                     self.global_table_state.select(Some(i));
                 }
                 1 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.top_players.len()
-                    } else {
-                        self.group_players.len()
-                    };
+                    let len = self.top_players.len();
                     let i = match self.players_state.selected() {
                         Some(i) => {
                             if i == 0 {
@@ -1236,11 +881,7 @@ impl App {
                     self.players_state.select(Some(i));
                 }
                 2 => {
-                    let len = if matches!(self.view, View::Global) {
-                        self.recent_matches.len()
-                    } else {
-                        self.group_matches.len()
-                    };
+                    let len = self.recent_matches.len();
                     let i = match self.matches_state.selected() {
                         Some(i) => {
                             if i == 0 {

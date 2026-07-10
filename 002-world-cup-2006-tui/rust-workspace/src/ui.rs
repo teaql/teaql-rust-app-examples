@@ -1,5 +1,4 @@
 use crate::app::{App, KnockoutMatchView, View};
-use fifa_world_cup_2026_service::E;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -7,6 +6,19 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
+
+/// Pad a string to `target_width` display columns using spaces.
+/// Uses the same `unicode-width` crate that ratatui uses internally,
+/// ensuring our padding matches ratatui's span positioning exactly.
+fn pad_right(s: &str, target_width: usize) -> String {
+    let dw = UnicodeWidthStr::width(s);
+    if dw >= target_width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(target_width - dw))
+    }
+}
 
 fn get_block(title: String, is_active: bool) -> Block<'static> {
     let mut b = Block::default().borders(Borders::ALL).title(title);
@@ -32,8 +44,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Header
     let header_text = match &app.view {
-        View::Global => "World Cup 2026 - Knockout Dashboard".to_string(),
-        View::Group(g) => format!("World Cup 2026 - Terminal Dashboard (Group {})", g),
+        View::Global => "World Cup 2026 - Knockout Bracket Dashboard".to_string(),
         View::Players => "World Cup 2026 - Terminal Dashboard (Players)".to_string(),
         View::Logs => "World Cup 2026 - System Logs".to_string(),
     };
@@ -49,7 +60,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Main content
     match app.view.clone() {
         View::Global => render_global(f, app, chunks[1]),
-        View::Group(ref g) => render_group(f, app, chunks[1], g),
         View::Players => render_players(f, app, chunks[1]),
         View::Logs => render_logs(f, app, chunks[1]),
     }
@@ -60,7 +70,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Commands: global | group A | players | sync live | logs | quit"),
+                .title("Commands: bracket | players | sync live | logs | quit"),
         );
     f.render_widget(input, chunks[2]);
 
@@ -80,20 +90,26 @@ pub fn team_short(name: &str) -> String {
     } else {
         name.to_string()
     };
-    // Known abbreviations for long names
+    // Only abbreviate names longer than 12 chars (bracket column width)
     match team_name.as_str() {
-        "Ivory Coast" => "CIV".to_string(),
         "United States" => "USA".to_string(),
         "Bosnia and Herzegovina" => "BIH".to_string(),
-        "DR Congo" => "COD".to_string(),
-        "Cape Verde" => "CPV".to_string(),
         "Czech Republic" => "CZE".to_string(),
-        "South Africa" => "RSA".to_string(),
-        "South Korea" => "KOR".to_string(),
-        "Saudi Arabia" => "KSA".to_string(),
-        "New Zealand" => "NZL".to_string(),
-        "Curaçao" => "CUW".to_string(),
-        other => other.split_whitespace().last().unwrap_or("?").to_string(),
+        other => {
+            let s = other.split_whitespace().last().unwrap_or("?").to_string();
+            if s.len() > 12 { s[..12].to_string() } else { s }
+        }
+    }
+}
+
+/// Extract the emoji flag from a team name like "🇨🇦 Canada" → "🇨🇦"
+pub fn team_flag(name: &str) -> String {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    if parts.len() > 1 {
+        parts[0].to_string()
+    } else {
+        // No flag found, fall back to short name
+        team_short(name)
     }
 }
 
@@ -108,19 +124,18 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         return;
     }
 
-    // Group by stage_rank, exclude Third Place (5) from the tree
     let mut stages: BTreeMap<usize, Vec<&KnockoutMatchView>> = BTreeMap::new();
     for m in matches {
-        if m.stage_rank != 5 {
-            stages.entry(m.stage_rank).or_default().push(m);
-        }
+        stages.entry(m.stage_rank).or_default().push(m);
     }
 
-    let keys: Vec<usize> = stages.keys().copied().collect();
-    let ncols = keys.len();
+    // Data is already reordered by fetch_knockout_matches to match bracket structure
+    let r32 = stages.get(&1).cloned().unwrap_or_default();
+    let r16 = stages.get(&2).cloned().unwrap_or_default();
+    let qf = stages.get(&3).cloned().unwrap_or_default();
 
-    let r32 = stages.get(&1).map_or(0, |v| v.len());
-    if r32 == 0 {
+    let r32_count = r32.len();
+    if r32_count == 0 {
         let msg = Paragraph::new("No R32 matches found.")
             .style(Style::default().fg(Color::DarkGray))
             .block(get_block("Knockout Bracket".to_string(), active));
@@ -128,170 +143,247 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         return;
     }
 
-    let nrows = 2 * r32 - 1;
+    // 16 matches, 1 line each, with 1 gap row between entries → 2*16-1 = 31 rows
+    let nrows = 2 * r32_count - 1;
 
-    // Line positions: pos[stage_idx][match_idx] = line_number
-    // Formula: level L, match i → line = (2^L - 1) + i * 2^(L+1)
-    let mut pos: Vec<Vec<usize>> = Vec::new();
-    for (si, &key) in keys.iter().enumerate() {
-        let cnt = stages[&key].len();
-        let stride = 1 << (si + 1);
-        let offset = (1 << si) - 1;
-        pos.push((0..cnt).map(|i| offset + i * stride).collect());
-    }
+    // Col 0 + Col 1: match i at row 2*i
+    let col1_pos: Vec<usize> = (0..r32_count).map(|i| 2 * i).collect();
 
-    // Connectors between adjacent columns
-    #[derive(Clone, Copy)]
+    // Col 2 (8强): centered between pairs from col 1
+    let col2_pos: Vec<usize> = (0..r32_count / 2)
+        .map(|j| (col1_pos[2 * j] + col1_pos[2 * j + 1]) / 2)
+        .collect();
+
+    // Col 3 (4强): centered between pairs from col 2
+    let col3_pos: Vec<usize> = (0..col2_pos.len() / 2)
+        .map(|k| (col2_pos[2 * k] + col2_pos[2 * k + 1]) / 2)
+        .collect();
+
+    // Winner name lists
+    let winner_short = |m: &KnockoutMatchView| -> String {
+        m.winner
+            .as_ref()
+            .map(|w| team_short(w))
+            .unwrap_or_else(|| "---".to_string())
+    };
+    let col1_names: Vec<String> = r32.iter().map(|m| winner_short(m)).collect();
+    // QF column: show "? date" when R16 winner is unknown
+    // Date = when R16 match finishes (determines who advances to QF)
+    let r16_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M89" | "M90" => "7/7".to_string(),
+            "M91" | "M92" => "7/7".to_string(),
+            "M93" | "M94" => "7/8".to_string(),
+            "M95" | "M96" => "7/8".to_string(),
+            _ => "TBD".to_string(),
+        }
+    };
+    let col2_names: Vec<String> = r16.iter().map(|m| {
+        match &m.winner {
+            Some(w) => team_short(w),
+            None => format!("? {}", r16_date(m)),
+        }
+    }).collect();
+    // SF column: show "? date" when QF winner is unknown
+    // Date = when QF match finishes (determines who advances to SF)
+    let qf_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M97" => "7/9".to_string(),
+            "M98" => "7/10".to_string(),
+            "M99" | "M100" => "7/11".to_string(),
+            _ => "TBD".to_string(),
+        }
+    };
+    let col3_names: Vec<String> = qf.iter().map(|m| {
+        match &m.winner {
+            Some(w) => team_short(w),
+            None => format!("? {}", qf_date(m)),
+        }
+    }).collect();
+
+    // Connectors
+    #[derive(Clone, Copy, PartialEq)]
     enum Conn {
-        E, // Empty
-        T, // Top: ─┐
-        M, // Mid: ├─
-        B, // Bottom: ─┘
-        V, // Vert: │
+        Empty,
+        Top,  // ─┐
+        Bot,  // ─┘
+        Mid,  // ├─
+        Vert, //  │
     }
-    let mut cx: Vec<Vec<Conn>> = vec![vec![Conn::E; ncols.saturating_sub(1)]; nrows];
 
-    for c in 0..ncols.saturating_sub(1) {
-        for (j, &lm) in pos[c + 1].iter().enumerate() {
-            let lt = pos[c][2 * j];
-            let lb = pos[c][2 * j + 1];
-            if lt < nrows {
-                cx[lt][c] = Conn::T;
-            }
-            if lm < nrows {
-                cx[lm][c] = Conn::M;
-            }
-            if lb < nrows {
-                cx[lb][c] = Conn::B;
-            }
-            for l in (lt + 1)..lm {
-                if l < nrows {
-                    cx[l][c] = Conn::V;
-                }
-            }
-            for l in (lm + 1)..lb {
-                if l < nrows {
-                    cx[l][c] = Conn::V;
-                }
+    let build_conn = |src: &[usize], dst: &[usize], n: usize| -> Vec<Conn> {
+        let mut c = vec![Conn::Empty; n];
+        for j in 0..dst.len() {
+            let t = src[2 * j];
+            let b = src[2 * j + 1];
+            let m = dst[j];
+            if t < n { c[t] = Conn::Top; }
+            if b < n { c[b] = Conn::Bot; }
+            if m < n { c[m] = Conn::Mid; }
+            for r in (t + 1)..b {
+                if r < n && c[r] == Conn::Empty { c[r] = Conn::Vert; }
             }
         }
-    }
-
-    // Dynamic column width based on available space
-    let conn_w = 3usize;
-    let avail = area.width.saturating_sub(2) as usize; // subtract block borders
-    let col_w = if ncols > 0 {
-        let total_conn = conn_w * ncols.saturating_sub(1);
-        ((avail.saturating_sub(total_conn)) / ncols).max(12).min(30)
-    } else {
-        22
+        c
     };
 
-    let stage_label = |k: usize| -> &str {
-        match k {
-            1 => "R32",
-            2 => "R16",
-            3 => "QF",
-            4 => "SF",
-            6 => "Final",
-            _ => "?",
-        }
+    let conn12 = build_conn(&col1_pos, &col2_pos, nrows);
+    let conn23 = build_conn(&col2_pos, &col3_pos, nrows);
+
+    // Column widths
+    let avail = area.width.saturating_sub(2) as usize;
+    let cw = 2_usize; // connector width
+    // col0 (match) + gap + col1 + conn + col2 + conn + col3
+    let col0_w = ((avail.saturating_sub(cw * 2 + 2)) * 38 / 100).max(16).min(24);
+    let rest = avail.saturating_sub(col0_w + cw * 2 + 2);
+    let sw = (rest / 3).max(4).min(12);
+
+    // Format match line using flag emojis: "🇨🇦 1-0 🇿🇦"
+    let fmt_match = |m: &KnockoutMatchView, w: usize| -> (String, Style) {
+        let h = team_flag(&m.home);
+        let a = team_flag(&m.away);
+        let text = format!("{} {} {}", h, m.score, a);
+        let style = if m.completed {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        (pad_right(&text, w), style)
     };
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Header row
-    let mut hdr = Vec::new();
-    for (i, &k) in keys.iter().enumerate() {
-        hdr.push(Span::styled(
-            format!("{:^w$}", stage_label(k), w = col_w),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-        if i < ncols - 1 {
-            hdr.push(Span::raw("   "));
-        }
-    }
-    lines.push(Line::from(hdr));
-
-    // Thin separator
-    let sep_len = col_w * ncols + conn_w * ncols.saturating_sub(1);
+    // Header
+    lines.push(Line::from(vec![
+        Span::styled(pad_right("R32", col0_w), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(pad_right("R16", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(pad_right("QF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(pad_right("SF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+    ]));
     lines.push(Line::from(Span::styled(
-        "─".repeat(sep_len.min(avail)),
+        "─".repeat((col0_w + sw * 3 + cw * 2 + 2).min(avail)),
         Style::default().fg(Color::DarkGray),
     )));
 
     // Data rows
     for r in 0..nrows {
-        let mut spans = Vec::new();
+        let mut spans: Vec<Span> = Vec::new();
+        let is_match_row = r % 2 == 0;
 
-        for c in 0..ncols {
-            // Find match at this line in this column
-            let m_opt = pos[c]
-                .iter()
-                .position(|&p| p == r)
-                .map(|i| stages[&keys[c]][i]);
+        // Col 0: R32 match
+        // Emoji flags render slightly wider in terminals than unicode-width reports.
+        // Match rows have 2 flags → blank rows need +1 extra padding to keep connectors aligned.
+        const FLAG_OFFSET: usize = 1;
+        let mi = r / 2;
+        if r % 2 == 0 && mi < r32.len() {
+            let (text, style) = fmt_match(r32[mi], col0_w);
+            spans.push(Span::styled(text, style));
+        } else {
+            spans.push(Span::raw(" ".repeat(col0_w + FLAG_OFFSET)));
+        }
 
-            if let Some(m) = m_opt {
-                let style = if m.completed {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
-                let h = team_short(&m.home);
-                let a = team_short(&m.away);
-                let text = format!("{:>6} {} {:<6}", h, m.score, a);
-                spans.push(Span::styled(
-                    format!("{:<w$}", text, w = col_w),
-                    style,
-                ));
+        spans.push(Span::raw("  "));
+
+        // Col 1: R16
+        if let Some(idx) = col1_pos.iter().position(|&p| p == r) {
+            if idx < col1_names.len() {
+                let n = &col1_names[idx];
+                let st = if n == "---" { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Green) };
+                spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
             } else {
-                spans.push(Span::raw(" ".repeat(col_w)));
+                spans.push(Span::raw(" ".repeat(sw)));
             }
+        } else {
+            spans.push(Span::raw(" ".repeat(sw)));
+        }
 
-            // Connector between this column and the next
-            if c < ncols - 1 {
-                let (s, st) = match cx[r][c] {
-                    Conn::E => ("   ", Style::default()),
-                    Conn::T => (" ─┐", Style::default().fg(Color::DarkGray)),
-                    Conn::M => (" ├─", Style::default().fg(Color::DarkGray)),
-                    Conn::B => (" ─┘", Style::default().fg(Color::DarkGray)),
-                    Conn::V => (" │ ", Style::default().fg(Color::DarkGray)),
-                };
-                spans.push(Span::styled(s, st));
+        // Connector 1→2
+        let (cs, cst) = match conn12[r] {
+            Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
+            Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
+            Conn::Mid   => ("├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert if is_match_row => ("  │", Style::default().fg(Color::DarkGray)),
+            Conn::Vert  => (" │", Style::default().fg(Color::DarkGray)),
+            Conn::Empty if is_match_row => ("   ", Style::default()),
+            Conn::Empty => ("  ", Style::default()),
+        };
+        spans.push(Span::styled(cs, cst));
+
+        // Col 2: QF
+        if let Some(idx) = col2_pos.iter().position(|&p| p == r) {
+            if idx < col2_names.len() {
+                let n = &col2_names[idx];
+                let st = if n.starts_with("?") { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Cyan) };
+                spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
+            } else {
+                spans.push(Span::raw(" ".repeat(sw)));
             }
+        } else {
+            spans.push(Span::raw(" ".repeat(sw)));
+        }
+
+        // Connector 2→3
+        // On match rows (even), col0 has emoji flags that render wider, but FLAG_OFFSET
+        // only pads blank rows. So conn23 Vert (│) on match rows needs an extra space
+        // to align with conn23 Top/Mid/Bot on blank rows.
+        let (cs2, cst2) = match conn23[r] {
+            Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
+            Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
+            Conn::Mid   => (" ├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert if is_match_row => ("  │", Style::default().fg(Color::DarkGray)),
+            Conn::Vert  => (" │", Style::default().fg(Color::DarkGray)),
+            Conn::Empty if is_match_row => ("   ", Style::default()),
+            Conn::Empty => ("  ", Style::default()),
+        };
+        spans.push(Span::styled(cs2, cst2));
+
+        // Col 3: SF
+        if let Some(idx) = col3_pos.iter().position(|&p| p == r) {
+            if idx < col3_names.len() {
+                let n = &col3_names[idx];
+                let st = if n.starts_with("?") { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) };
+                spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
+            } else {
+                spans.push(Span::raw(" ".repeat(sw)));
+            }
+        } else {
+            spans.push(Span::raw(" ".repeat(sw)));
         }
 
         lines.push(Line::from(spans));
     }
 
-    // Champion line
-    let champion = matches
-        .iter()
-        .find(|m| m.stage_rank == 6)
-        .and_then(|m| m.winner.clone())
-        .unwrap_or_else(|| "TBD".to_string());
+    // Final + 3rd Place
+    let final_m = stages.get(&6).and_then(|v| v.first());
+    let third_m = stages.get(&5).and_then(|v| v.first());
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("🏆 Champion: {}", champion),
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    )));
 
-    // Projected matches have score "vs", actual matches have real scores
-    let is_projected = !matches.is_empty() && matches.iter().all(|m| m.score == "vs");
-    let completed_count = matches.iter().filter(|m| m.completed).count();
-    let title = if is_projected {
-        format!("Projected Bracket (from standings)")
-    } else {
-        format!(
-            "Knockout Results  {}/{} completed",
-            completed_count,
-            matches.len()
-        )
-    };
+    if let Some(fm) = final_m {
+        let champ = fm.winner.as_deref().unwrap_or("TBD");
+        lines.push(Line::from(vec![
+            Span::styled("🏆 Final: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{} {} {}", team_short(&fm.home), fm.score, team_short(&fm.away)),
+                if fm.completed { Style::default().fg(Color::Green) } else { Style::default().fg(Color::White) },
+            ),
+            Span::styled(format!("  Champion: {}", champ), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]));
+    }
+    if let Some(tm) = third_m {
+        lines.push(Line::from(vec![
+            Span::styled("🥉 3rd:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{} {} {}", team_short(&tm.home), tm.score, team_short(&tm.away)),
+                if tm.completed { Style::default().fg(Color::Green) } else { Style::default().fg(Color::White) },
+            ),
+        ]));
+    }
+
+    let done = matches.iter().filter(|m| m.completed).count();
+    let title = format!("Knockout Bracket  {}/{} completed", done, matches.len());
     let tree = Paragraph::new(lines).block(get_block(title, active));
     f.render_widget(tree, area);
 }
@@ -299,7 +391,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 fn render_global(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
         .split(area);
 
     let right_chunks = Layout::default()
@@ -382,157 +474,6 @@ fn render_global(f: &mut Frame, app: &mut App, area: Rect) {
     let m_sel = app.matches_state.selected().unwrap_or(0);
     let m_title = format!(
         "Completed Knockout Matches  {} / {}  ↑/↓ to scroll",
-        if m_len > 0 { m_sel + 1 } else { 0 },
-        m_len
-    );
-    let m_table = Table::new(
-        m_rows,
-        [
-            Constraint::Percentage(40),
-            Constraint::Percentage(20),
-            Constraint::Percentage(40),
-        ],
-    )
-    .header(m_header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(m_title, app.active_pane == 2));
-    f.render_stateful_widget(m_table, right_chunks[1], &mut app.matches_state);
-}
-
-fn render_group(f: &mut Frame, app: &mut App, area: Rect, g_letter: &str) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[1]);
-
-    // Group Standings
-    let header_cells = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)));
-    let header = Row::new(header_cells)
-        .style(Style::default().add_modifier(Modifier::BOLD))
-        .height(1)
-        .bottom_margin(1);
-
-    let rows: Vec<Row> = app
-        .group_standings
-        .iter()
-        .map(|s| {
-            let t_opt = E::group_standing(s).get_tournament_team().eval();
-            let team_display = t_opt
-                .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            Row::new(vec![
-                Cell::from(team_display),
-                Cell::from(s.played().to_string()),
-                Cell::from(s.won().to_string()),
-                Cell::from(s.drawn().to_string()),
-                Cell::from(s.lost().to_string()),
-                Cell::from(s.goals_for().to_string()),
-                Cell::from(s.goals_against().to_string()),
-                Cell::from(s.goal_difference().to_string()),
-                Cell::from(s.points().to_string()).style(Style::default().fg(Color::Green)),
-            ])
-        })
-        .collect();
-
-    let g_len = app.group_standings.len();
-    let g_sel = app.global_table_state.selected().unwrap_or(0);
-    let title = format!(
-        "Group {} Standings  {} / {}  ↑/↓ to scroll",
-        g_letter,
-        g_sel + 1,
-        g_len
-    );
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(25),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(4),
-            Constraint::Length(4),
-        ],
-    )
-    .header(header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(title, app.active_pane == 0));
-    f.render_stateful_widget(table, chunks[0], &mut app.global_table_state);
-
-    // Group Players
-    let p_header = Row::new(vec!["Team", "Player", "Goals"])
-        .style(Style::default().add_modifier(Modifier::BOLD))
-        .bottom_margin(1);
-    let p_rows: Vec<Row> = app
-        .group_players
-        .iter()
-        .map(|(t, p, c)| {
-            Row::new(vec![
-                Cell::from(t.clone()),
-                Cell::from(p.clone()),
-                Cell::from(c.to_string()).style(Style::default().fg(Color::Yellow)),
-            ])
-        })
-        .collect();
-    let p_table = Table::new(
-        p_rows,
-        [
-            Constraint::Percentage(30),
-            Constraint::Percentage(50),
-            Constraint::Percentage(20),
-        ],
-    )
-    .header(p_header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(
-        format!("Group {} Top Players", g_letter),
-        app.active_pane == 1,
-    ));
-    f.render_stateful_widget(p_table, right_chunks[0], &mut app.players_state);
-
-    // Group Matches
-    let m_header = Row::new(vec![
-        Cell::from(Line::from("Home").alignment(Alignment::Right)),
-        Cell::from(Line::from("Score").alignment(Alignment::Center)),
-        Cell::from(Line::from("Away").alignment(Alignment::Left)),
-    ])
-    .style(Style::default().add_modifier(Modifier::BOLD))
-    .bottom_margin(1);
-    let m_rows: Vec<Row> = app
-        .group_matches
-        .iter()
-        .map(|m| {
-            let h = m
-                .home_team()
-                .map(|t| format!("{} {}", t.team_name(), t.emoji_flag()))
-                .unwrap_or_default();
-            let a = m
-                .away_team()
-                .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
-                .unwrap_or_default();
-            let s = format!("{} - {}", m.home_score(), m.away_score());
-            Row::new(vec![
-                Cell::from(Line::from(h).alignment(Alignment::Right)),
-                Cell::from(Line::from(s).alignment(Alignment::Center)),
-                Cell::from(Line::from(a).alignment(Alignment::Left)),
-            ])
-        })
-        .collect();
-    let m_len = app.group_matches.len();
-    let m_sel = app.matches_state.selected().unwrap_or(0);
-    let m_title = format!(
-        "Group {} Completed Matches  {} / {}  ↑/↓ to scroll",
-        g_letter,
         if m_len > 0 { m_sel + 1 } else { 0 },
         m_len
     );
