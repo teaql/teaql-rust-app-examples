@@ -253,15 +253,13 @@ impl App {
             .collect();
 
         // Deduplicate by match label: if fix_data created a real match with
-        // the same match_number as a seed match, keep the completed one
-        // (or the last one which is the fix_data entry).
-        let mut seen = std::collections::HashMap::new();
+        // the same match_number as a seed match, keep the later one
+        // (fix_data entries have higher IDs and appear later in the list).
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for (i, m) in result.iter().enumerate() {
             let entry = seen.entry(m.label.clone()).or_insert(i);
-            // Prefer the completed match over a placeholder
-            if m.completed {
-                *entry = i;
-            }
+            // Always prefer later entries (fix_data corrections come after seed)
+            *entry = i;
         }
         let keep: std::collections::HashSet<usize> = seen.values().copied().collect();
         let mut deduped: Vec<KnockoutMatchView> = result
@@ -276,7 +274,87 @@ impl App {
                 .cmp(&b.stage_rank)
                 .then_with(|| a.label.cmp(&b.label))
         });
-        Ok(deduped)
+
+        // Reorder within each stage to match bracket structure:
+        // QF stays sorted by label. R16 is reordered so that for each QF,
+        // the two R16 matches whose winners are the QF participants are adjacent.
+        // R32 is similarly reordered based on R16 participants.
+        use crate::ui::team_short;
+
+        let mut by_stage: std::collections::BTreeMap<usize, Vec<KnockoutMatchView>> =
+            std::collections::BTreeMap::new();
+        for m in deduped {
+            by_stage.entry(m.stage_rank).or_default().push(m);
+        }
+
+        let qf = by_stage.remove(&3).unwrap_or_default();
+        let r16_orig = by_stage.remove(&2).unwrap_or_default();
+        let r32_orig = by_stage.remove(&1).unwrap_or_default();
+
+        // Reorder R16 by QF bracket
+        let mut r16: Vec<KnockoutMatchView> = Vec::new();
+        let mut r16_used = vec![false; r16_orig.len()];
+        for q in &qf {
+            for team in [&q.home, &q.away] {
+                let ts = team_short(team);
+                // First try: winner matches
+                let idx = r16_orig.iter().enumerate().position(|(i, m)| {
+                    !r16_used[i]
+                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                });
+                // Fallback: home/away matches
+                let idx = idx.or_else(|| {
+                    r16_orig.iter().enumerate().position(|(i, m)| {
+                        !r16_used[i]
+                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                    })
+                });
+                if let Some(idx) = idx {
+                    r16_used[idx] = true;
+                    r16.push(r16_orig[idx].clone());
+                }
+            }
+        }
+        for (i, m) in r16_orig.into_iter().enumerate() {
+            if !r16_used[i] { r16.push(m); }
+        }
+
+        // Reorder R32 by R16 bracket
+        let mut r32: Vec<KnockoutMatchView> = Vec::new();
+        let mut r32_used = vec![false; r32_orig.len()];
+        for r in &r16 {
+            for team in [&r.home, &r.away] {
+                let ts = team_short(team);
+                let idx = r32_orig.iter().enumerate().position(|(i, m)| {
+                    !r32_used[i]
+                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                });
+                let idx = idx.or_else(|| {
+                    r32_orig.iter().enumerate().position(|(i, m)| {
+                        !r32_used[i]
+                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                    })
+                });
+                if let Some(idx) = idx {
+                    r32_used[idx] = true;
+                    r32.push(r32_orig[idx].clone());
+                }
+            }
+        }
+        for (i, m) in r32_orig.into_iter().enumerate() {
+            if !r32_used[i] { r32.push(m); }
+        }
+
+        // Reassemble in order: R32, R16, QF, then remaining stages (SF, 3rd, Final)
+        let mut final_result = Vec::new();
+        final_result.extend(r32);
+        final_result.extend(r16);
+        final_result.extend(qf);
+        for (_, ms) in by_stage {
+            final_result.extend(ms);
+        }
+
+        Ok(final_result)
     }
 
     fn knockout_match_view(

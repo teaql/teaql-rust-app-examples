@@ -121,6 +121,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         stages.entry(m.stage_rank).or_default().push(m);
     }
 
+    // Data is already reordered by fetch_knockout_matches to match bracket structure
     let r32 = stages.get(&1).cloned().unwrap_or_default();
     let r16 = stages.get(&2).cloned().unwrap_or_default();
     let qf = stages.get(&3).cloned().unwrap_or_default();
