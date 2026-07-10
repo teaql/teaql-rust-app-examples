@@ -8,40 +8,11 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-/// Calculate terminal display width of a string, handling emoji flags correctly.
-/// unicode-width may undercount flags like 🏴󠁧󠁢󠁥󠁮󠁧󠁿 (tag sequence).
-/// We detect flag segments and assign them 2 display columns each.
-fn display_width(s: &str) -> usize {
-    let mut w = 0;
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        // Regional Indicator pair (country flags like 🇨🇦)
-        if ('\u{1F1E6}'..='\u{1F1FF}').contains(&c) {
-            // Consume the second regional indicator if present
-            if chars.peek().map_or(false, |nc| ('\u{1F1E6}'..='\u{1F1FF}').contains(nc)) {
-                chars.next();
-            }
-            w += 2;
-        }
-        // Black flag 🏴 followed by tag characters (subdivision flags like 🏴󠁧󠁢󠁥󠁮󠁧󠁿)
-        else if c == '\u{1F3F4}' {
-            // Consume all tag characters (U+E0020..U+E007F)
-            while chars.peek().map_or(false, |nc| ('\u{E0020}'..='\u{E007F}').contains(nc)) {
-                chars.next();
-            }
-            w += 2;
-        }
-        // CJK and other wide characters
-        else {
-            w += UnicodeWidthStr::width(c.encode_utf8(&mut [0u8; 4]) as &str);
-        }
-    }
-    w
-}
-
 /// Pad a string to `target_width` display columns using spaces.
+/// Uses the same `unicode-width` crate that ratatui uses internally,
+/// ensuring our padding matches ratatui's span positioning exactly.
 fn pad_right(s: &str, target_width: usize) -> String {
-    let dw = display_width(s);
+    let dw = UnicodeWidthStr::width(s);
     if dw >= target_width {
         s.to_string()
     } else {
