@@ -260,11 +260,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     lines.push(Line::from(vec![
         Span::styled(pad_right("R32", col0_w), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(pad_right("16强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("R16", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(pad_right("8强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("QF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(pad_right("4强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("SF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::from(Span::styled(
         "─".repeat((col0_w + sw * 3 + cw * 2 + 2).min(avail)),
@@ -286,7 +286,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 
         spans.push(Span::raw("  "));
 
-        // Col 1: 16强
+        // Col 1: R16
         if let Some(idx) = col1_pos.iter().position(|&p| p == r) {
             if idx < col1_names.len() {
                 let n = &col1_names[idx];
@@ -309,7 +309,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         };
         spans.push(Span::styled(cs, cst));
 
-        // Col 2: 8强
+        // Col 2: QF
         if let Some(idx) = col2_pos.iter().position(|&p| p == r) {
             if idx < col2_names.len() {
                 let n = &col2_names[idx];
@@ -332,7 +332,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         };
         spans.push(Span::styled(cs2, cst2));
 
-        // Col 3: 4强
+        // Col 3: SF
         if let Some(idx) = col3_pos.iter().position(|&p| p == r) {
             if idx < col3_names.len() {
                 let n = &col3_names[idx];
