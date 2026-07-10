@@ -217,7 +217,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     // col0 (match) + gap + col1 + conn + col2 + conn + col3
     let col0_w = ((avail.saturating_sub(cw * 2 + 2)) * 38 / 100).max(16).min(24);
     let rest = avail.saturating_sub(col0_w + cw * 2 + 2);
-    let sw = (rest / 3).max(4).min(10);
+    let sw = (rest / 3).max(4).min(12);
 
     // Format match line using flag emojis: "🇨🇦 1-0 🇿🇦"
     let fmt_match = |m: &KnockoutMatchView, w: usize| -> (String, Style) {
