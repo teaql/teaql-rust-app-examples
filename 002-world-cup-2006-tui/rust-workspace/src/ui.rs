@@ -6,6 +6,48 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
+
+/// Calculate terminal display width of a string, handling emoji flags correctly.
+/// unicode-width may undercount flags like 🏴󠁧󠁢󠁥󠁮󠁧󠁿 (tag sequence).
+/// We detect flag segments and assign them 2 display columns each.
+fn display_width(s: &str) -> usize {
+    let mut w = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        // Regional Indicator pair (country flags like 🇨🇦)
+        if ('\u{1F1E6}'..='\u{1F1FF}').contains(&c) {
+            // Consume the second regional indicator if present
+            if chars.peek().map_or(false, |nc| ('\u{1F1E6}'..='\u{1F1FF}').contains(nc)) {
+                chars.next();
+            }
+            w += 2;
+        }
+        // Black flag 🏴 followed by tag characters (subdivision flags like 🏴󠁧󠁢󠁥󠁮󠁧󠁿)
+        else if c == '\u{1F3F4}' {
+            // Consume all tag characters (U+E0020..U+E007F)
+            while chars.peek().map_or(false, |nc| ('\u{E0020}'..='\u{E007F}').contains(nc)) {
+                chars.next();
+            }
+            w += 2;
+        }
+        // CJK and other wide characters
+        else {
+            w += UnicodeWidthStr::width(c.encode_utf8(&mut [0u8; 4]) as &str);
+        }
+    }
+    w
+}
+
+/// Pad a string to `target_width` display columns using spaces.
+fn pad_right(s: &str, target_width: usize) -> String {
+    let dw = display_width(s);
+    if dw >= target_width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(target_width - dw))
+    }
+}
 
 fn get_block(title: String, is_active: bool) -> Block<'static> {
     let mut b = Block::default().borders(Borders::ALL).title(title);
@@ -209,20 +251,20 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         } else {
             Style::default().fg(Color::White)
         };
-        (format!("{:<w$}", text, w = w), style)
+        (pad_right(&text, w), style)
     };
 
     let mut lines: Vec<Line> = Vec::new();
 
     // Header
     lines.push(Line::from(vec![
-        Span::styled(format!("{:<w$}", "R32", w = col0_w), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("R32", col0_w), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(format!("{:<w$}", "16强", w = sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("16强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(format!("{:<w$}", "8强", w = sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("8强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(format!("{:<w$}", "4强", w = sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(pad_right("4强", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::from(Span::styled(
         "─".repeat((col0_w + sw * 3 + cw * 2 + 2).min(avail)),
