@@ -240,6 +240,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     // Data rows
     for r in 0..nrows {
         let mut spans: Vec<Span> = Vec::new();
+        let is_match_row = r % 2 == 0;
 
         // Col 0: R32 match
         // Emoji flags render slightly wider in terminals than unicode-width reports.
@@ -273,7 +274,9 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
             Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
             Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
             Conn::Mid   => ("├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert if is_match_row => ("  │", Style::default().fg(Color::DarkGray)),
             Conn::Vert  => (" │", Style::default().fg(Color::DarkGray)),
+            Conn::Empty if is_match_row => ("   ", Style::default()),
             Conn::Empty => ("  ", Style::default()),
         };
         spans.push(Span::styled(cs, cst));
@@ -295,7 +298,6 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         // On match rows (even), col0 has emoji flags that render wider, but FLAG_OFFSET
         // only pads blank rows. So conn23 Vert (│) on match rows needs an extra space
         // to align with conn23 Top/Mid/Bot on blank rows.
-        let is_match_row = r % 2 == 0;
         let (cs2, cst2) = match conn23[r] {
             Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
             Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
