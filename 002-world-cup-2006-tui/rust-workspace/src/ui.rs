@@ -168,22 +168,36 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     };
     let col1_names: Vec<String> = r32.iter().map(|m| winner_short(m)).collect();
     // QF column: show "? date" when R16 winner is unknown
-    // R16[0]+R16[1]→QF 7/9, R16[2]+R16[3]→QF 7/10, R16[4]+R16[5]→QF 7/11, R16[6]+R16[7]→QF 7/11
-    let qf_dates = ["7/9", "7/9", "7/10", "7/10", "7/11", "7/11", "7/11", "7/11"];
-    let col2_names: Vec<String> = r16.iter().enumerate().map(|(i, m)| {
+    // Date = when R16 match finishes (determines who advances to QF)
+    let r16_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M89" | "M90" => "7/7".to_string(),
+            "M91" | "M92" => "7/7".to_string(),
+            "M93" | "M94" => "7/8".to_string(),
+            "M95" | "M96" => "7/8".to_string(),
+            _ => "TBD".to_string(),
+        }
+    };
+    let col2_names: Vec<String> = r16.iter().map(|m| {
         match &m.winner {
             Some(w) => team_short(w),
-            None => format!("? {}", qf_dates.get(i).unwrap_or(&"TBD")),
+            None => format!("? {}", r16_date(m)),
         }
     }).collect();
     // SF column: show "? date" when QF winner is unknown
     // Date = when QF match finishes (determines who advances to SF)
-    // QF M97=7/9, M98=7/10, M99=7/11, M100=7/11
-    let sf_dates = ["7/9", "7/10", "7/11", "7/11"];
-    let col3_names: Vec<String> = qf.iter().enumerate().map(|(i, m)| {
+    let qf_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M97" => "7/9".to_string(),
+            "M98" => "7/10".to_string(),
+            "M99" | "M100" => "7/11".to_string(),
+            _ => "TBD".to_string(),
+        }
+    };
+    let col3_names: Vec<String> = qf.iter().map(|m| {
         match &m.winner {
             Some(w) => team_short(w),
-            None => format!("? {}", sf_dates.get(i).unwrap_or(&"TBD")),
+            None => format!("? {}", qf_date(m)),
         }
     }).collect();
 
