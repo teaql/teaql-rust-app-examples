@@ -90,26 +90,14 @@ pub fn team_short(name: &str) -> String {
     } else {
         name.to_string()
     };
-    // Known abbreviations for long names
+    // Only abbreviate names longer than 12 chars (bracket column width)
     match team_name.as_str() {
-        "Ivory Coast" => "CIV".to_string(),
         "United States" => "USA".to_string(),
         "Bosnia and Herzegovina" => "BIH".to_string(),
-        "DR Congo" => "COD".to_string(),
-        "Cape Verde" => "CPV".to_string(),
         "Czech Republic" => "CZE".to_string(),
-        "South Africa" => "RSA".to_string(),
-        "South Korea" => "KOR".to_string(),
-        "Saudi Arabia" => "KSA".to_string(),
-        "New Zealand" => "NZL".to_string(),
-        "Curaçao" => "CUW".to_string(),
-        "Switzerland" => "SUI".to_string(),
-        "Netherlands" => "NED".to_string(),
-        "Türkiye" => "TUR".to_string(),
         other => {
             let s = other.split_whitespace().last().unwrap_or("?").to_string();
-            // Truncate to 10 chars as safety net for bracket column width
-            if s.len() > 10 { s[..10].to_string() } else { s }
+            if s.len() > 12 { s[..12].to_string() } else { s }
         }
     }
 }
