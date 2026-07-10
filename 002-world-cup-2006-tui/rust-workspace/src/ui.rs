@@ -167,9 +167,17 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
             .unwrap_or_else(|| "---".to_string())
     };
     let col1_names: Vec<String> = r32.iter().map(|m| winner_short(m)).collect();
-    let col2_names: Vec<String> = r16.iter().map(|m| winner_short(m)).collect();
+    // QF column: show "? date" when R16 winner is unknown
+    // R16[0]+R16[1]→QF 7/9, R16[2]+R16[3]→QF 7/10, R16[4]+R16[5]→QF 7/11, R16[6]+R16[7]→QF 7/11
+    let qf_dates = ["7/9", "7/9", "7/10", "7/10", "7/11", "7/11", "7/11", "7/11"];
+    let col2_names: Vec<String> = r16.iter().enumerate().map(|(i, m)| {
+        match &m.winner {
+            Some(w) => team_short(w),
+            None => format!("? {}", qf_dates.get(i).unwrap_or(&"TBD")),
+        }
+    }).collect();
     // SF column: show "? date" when QF winner is unknown
-    // QF[0]+QF[1] → SF1 (Jul 14), QF[2]+QF[3] → SF2 (Jul 15)
+    // QF[0]+QF[1]→SF1 7/14, QF[2]+QF[3]→SF2 7/15
     let sf_dates = ["7/14", "7/14", "7/15", "7/15"];
     let col3_names: Vec<String> = qf.iter().enumerate().map(|(i, m)| {
         match &m.winner {
@@ -293,7 +301,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         if let Some(idx) = col2_pos.iter().position(|&p| p == r) {
             if idx < col2_names.len() {
                 let n = &col2_names[idx];
-                let st = if n == "---" { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Cyan) };
+                let st = if n.starts_with("?") { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Cyan) };
                 spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
             } else {
                 spans.push(Span::raw(" ".repeat(sw)));
