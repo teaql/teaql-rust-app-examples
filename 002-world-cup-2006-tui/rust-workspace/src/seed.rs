@@ -162,5 +162,113 @@ pub async fn seed_data(ctx: &UserContext) -> Result<(), Box<dyn std::error::Erro
         standing.update_points(0);
         standing.audit_as("Seed group standing").save(ctx).await?;
     }
+
+    // --- Generate knockout bracket ---
+    // Fetch all teams sorted by FIFA ranking (ascending = best first)
+    let mut ranked_teams = Q::tournament_teams()
+        .order_by_fifa_ranking_asc()
+        .purpose("seed knockout")
+        .execute_for_list(ctx)
+        .await?
+        .data;
+
+    // Take top 32 for the knockout bracket
+    ranked_teams.truncate(32);
+
+    // Build a lookup from group_letter -> group id
+    let all_groups = Q::match_groups()
+        .purpose("seed knockout")
+        .execute_for_list(ctx)
+        .await?
+        .data;
+    let group_id_by_letter: std::collections::HashMap<String, u64> = all_groups
+        .iter()
+        .map(|g| (g.group_letter(), g.id()))
+        .collect();
+
+    // Create Round of 32 matches: seed 1 vs seed 32, seed 2 vs seed 31, ...
+    let num_r32 = 16;
+    for i in 0..num_r32 {
+        let home = &ranked_teams[i];
+        let away = &ranked_teams[31 - i];
+
+        let home_group_id = group_id_by_letter
+            .get(&home.group_letter())
+            .copied()
+            .unwrap_or(0);
+
+        let match_number = 73 + i as i32;
+
+        let mut m = Q::tournament_matches().purpose("seed").new_entity(ctx);
+        m.update_match_number(match_number);
+        m.update_match_date("TBD");
+        m.update_venue_name("TBD");
+        m.update_venue_city("TBD");
+        m.update_venue_country("TBD");
+        m.update_home_team_id(home.id());
+        m.update_away_team_id(away.id());
+        m.update_home_score(0);
+        m.update_away_score(0);
+        m.update_extra_time_home(0);
+        m.update_extra_time_away(0);
+        m.update_penalty_home(0);
+        m.update_penalty_away(0);
+        m.update_match_group_id(home_group_id);
+        m.update_tournament_id(t_id);
+        m.update_match_stage_to_round_of32();
+        m.update_match_status_to_scheduled();
+        m.audit_as("Seed R32 knockout match").save(ctx).await?;
+    }
+
+    // Helper: create placeholder shell matches for later rounds
+    // (home_team_id=0, away_team_id=0, scores=0)
+    struct ShellRound {
+        count: i32,
+        match_number_start: i32,
+        stage: &'static str,
+    }
+
+    let shell_rounds = vec![
+        ShellRound { count: 8, match_number_start: 89, stage: "R16" },
+        ShellRound { count: 4, match_number_start: 97, stage: "QF" },
+        ShellRound { count: 2, match_number_start: 101, stage: "SF" },
+        ShellRound { count: 1, match_number_start: 103, stage: "3RD" },
+        ShellRound { count: 1, match_number_start: 104, stage: "FINAL" },
+    ];
+
+    for round in &shell_rounds {
+        for j in 0..round.count {
+            let match_number = round.match_number_start + j;
+
+            let mut m = Q::tournament_matches().purpose("seed").new_entity(ctx);
+            m.update_match_number(match_number);
+            m.update_match_date("TBD");
+            m.update_venue_name("TBD");
+            m.update_venue_city("TBD");
+            m.update_venue_country("TBD");
+            m.update_home_team_id(0_u64);
+            m.update_away_team_id(0_u64);
+            m.update_home_score(0);
+            m.update_away_score(0);
+            m.update_extra_time_home(0);
+            m.update_extra_time_away(0);
+            m.update_penalty_home(0);
+            m.update_penalty_away(0);
+            m.update_match_group_id(0_u64);
+            m.update_tournament_id(t_id);
+
+            match round.stage {
+                "R16" => { m.update_match_stage_to_round_of16(); }
+                "QF" => { m.update_match_stage_to_quarter_final(); }
+                "SF" => { m.update_match_stage_to_semi_final(); }
+                "3RD" => { m.update_match_stage_to_third_place(); }
+                "FINAL" => { m.update_match_stage_to_final(); }
+                _ => {}
+            }
+            m.update_match_status_to_scheduled();
+            m.audit_as("Seed knockout shell match").save(ctx).await?;
+        }
+    }
+
     Ok(())
 }

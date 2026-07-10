@@ -1,5 +1,4 @@
 use crate::app::{App, KnockoutMatchView, View};
-use fifa_world_cup_2026_service::E;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -32,8 +31,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Header
     let header_text = match &app.view {
-        View::Global => "World Cup 2026 - Knockout Dashboard".to_string(),
-        View::Group(g) => format!("World Cup 2026 - Terminal Dashboard (Group {})", g),
+        View::Global => "World Cup 2026 - Knockout Bracket Dashboard".to_string(),
         View::Players => "World Cup 2026 - Terminal Dashboard (Players)".to_string(),
         View::Logs => "World Cup 2026 - System Logs".to_string(),
     };
@@ -49,7 +47,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Main content
     match app.view.clone() {
         View::Global => render_global(f, app, chunks[1]),
-        View::Group(ref g) => render_group(f, app, chunks[1], g),
         View::Players => render_players(f, app, chunks[1]),
         View::Logs => render_logs(f, app, chunks[1]),
     }
@@ -60,7 +57,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Commands: global | group A | players | sync live | logs | quit"),
+                .title("Commands: bracket | players | sync live | logs | quit"),
         );
     f.render_widget(input, chunks[2]);
 
@@ -382,157 +379,6 @@ fn render_global(f: &mut Frame, app: &mut App, area: Rect) {
     let m_sel = app.matches_state.selected().unwrap_or(0);
     let m_title = format!(
         "Completed Knockout Matches  {} / {}  ↑/↓ to scroll",
-        if m_len > 0 { m_sel + 1 } else { 0 },
-        m_len
-    );
-    let m_table = Table::new(
-        m_rows,
-        [
-            Constraint::Percentage(40),
-            Constraint::Percentage(20),
-            Constraint::Percentage(40),
-        ],
-    )
-    .header(m_header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(m_title, app.active_pane == 2));
-    f.render_stateful_widget(m_table, right_chunks[1], &mut app.matches_state);
-}
-
-fn render_group(f: &mut Frame, app: &mut App, area: Rect, g_letter: &str) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[1]);
-
-    // Group Standings
-    let header_cells = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)));
-    let header = Row::new(header_cells)
-        .style(Style::default().add_modifier(Modifier::BOLD))
-        .height(1)
-        .bottom_margin(1);
-
-    let rows: Vec<Row> = app
-        .group_standings
-        .iter()
-        .map(|s| {
-            let t_opt = E::group_standing(s).get_tournament_team().eval();
-            let team_display = t_opt
-                .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            Row::new(vec![
-                Cell::from(team_display),
-                Cell::from(s.played().to_string()),
-                Cell::from(s.won().to_string()),
-                Cell::from(s.drawn().to_string()),
-                Cell::from(s.lost().to_string()),
-                Cell::from(s.goals_for().to_string()),
-                Cell::from(s.goals_against().to_string()),
-                Cell::from(s.goal_difference().to_string()),
-                Cell::from(s.points().to_string()).style(Style::default().fg(Color::Green)),
-            ])
-        })
-        .collect();
-
-    let g_len = app.group_standings.len();
-    let g_sel = app.global_table_state.selected().unwrap_or(0);
-    let title = format!(
-        "Group {} Standings  {} / {}  ↑/↓ to scroll",
-        g_letter,
-        g_sel + 1,
-        g_len
-    );
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(25),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(4),
-            Constraint::Length(4),
-        ],
-    )
-    .header(header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(title, app.active_pane == 0));
-    f.render_stateful_widget(table, chunks[0], &mut app.global_table_state);
-
-    // Group Players
-    let p_header = Row::new(vec!["Team", "Player", "Goals"])
-        .style(Style::default().add_modifier(Modifier::BOLD))
-        .bottom_margin(1);
-    let p_rows: Vec<Row> = app
-        .group_players
-        .iter()
-        .map(|(t, p, c)| {
-            Row::new(vec![
-                Cell::from(t.clone()),
-                Cell::from(p.clone()),
-                Cell::from(c.to_string()).style(Style::default().fg(Color::Yellow)),
-            ])
-        })
-        .collect();
-    let p_table = Table::new(
-        p_rows,
-        [
-            Constraint::Percentage(30),
-            Constraint::Percentage(50),
-            Constraint::Percentage(20),
-        ],
-    )
-    .header(p_header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .block(get_block(
-        format!("Group {} Top Players", g_letter),
-        app.active_pane == 1,
-    ));
-    f.render_stateful_widget(p_table, right_chunks[0], &mut app.players_state);
-
-    // Group Matches
-    let m_header = Row::new(vec![
-        Cell::from(Line::from("Home").alignment(Alignment::Right)),
-        Cell::from(Line::from("Score").alignment(Alignment::Center)),
-        Cell::from(Line::from("Away").alignment(Alignment::Left)),
-    ])
-    .style(Style::default().add_modifier(Modifier::BOLD))
-    .bottom_margin(1);
-    let m_rows: Vec<Row> = app
-        .group_matches
-        .iter()
-        .map(|m| {
-            let h = m
-                .home_team()
-                .map(|t| format!("{} {}", t.team_name(), t.emoji_flag()))
-                .unwrap_or_default();
-            let a = m
-                .away_team()
-                .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
-                .unwrap_or_default();
-            let s = format!("{} - {}", m.home_score(), m.away_score());
-            Row::new(vec![
-                Cell::from(Line::from(h).alignment(Alignment::Right)),
-                Cell::from(Line::from(s).alignment(Alignment::Center)),
-                Cell::from(Line::from(a).alignment(Alignment::Left)),
-            ])
-        })
-        .collect();
-    let m_len = app.group_matches.len();
-    let m_sel = app.matches_state.selected().unwrap_or(0);
-    let m_title = format!(
-        "Group {} Completed Matches  {} / {}  ↑/↓ to scroll",
-        g_letter,
         if m_len > 0 { m_sel + 1 } else { 0 },
         m_len
     );
