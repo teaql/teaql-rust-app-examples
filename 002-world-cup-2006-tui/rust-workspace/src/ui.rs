@@ -94,6 +94,17 @@ pub fn team_short(name: &str) -> String {
     }
 }
 
+/// Extract the emoji flag from a team name like "🇨🇦 Canada" → "🇨🇦"
+pub fn team_flag(name: &str) -> String {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    if parts.len() > 1 {
+        parts[0].to_string()
+    } else {
+        // No flag found, fall back to short name
+        team_short(name)
+    }
+}
+
 fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect, active: bool) {
     use std::collections::BTreeMap;
 
@@ -187,11 +198,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     let rest = avail.saturating_sub(col0_w + cw * 2 + 2);
     let sw = (rest / 3).max(4).min(10);
 
-    // Format match line: "CAN 1-0 RSA" or "CAN vs RSA"
+    // Format match line using flag emojis: "🇨🇦 1-0 🇿🇦"
     let fmt_match = |m: &KnockoutMatchView, w: usize| -> (String, Style) {
-        let h = team_short(&m.home);
-        let a = team_short(&m.away);
-        let text = format!("{:>4} {} {:<4}", h, m.score, a);
+        let h = team_flag(&m.home);
+        let a = team_flag(&m.away);
+        let text = format!("{} {} {}", h, m.score, a);
         let style = if m.completed {
             Style::default().fg(Color::Green)
         } else {
