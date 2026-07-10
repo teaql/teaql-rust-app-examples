@@ -371,7 +371,8 @@ impl App {
             .away_team()
             .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
             .unwrap_or_else(|| "TBD".to_string());
-        let completed = m.home_score() != 0 || m.away_score() != 0;
+        let completed = m.home_score() != 0 || m.away_score() != 0
+            || m.penalty_home() != 0 || m.penalty_away() != 0;
         let mut score = if completed {
             format!("{} - {}", m.home_score(), m.away_score())
         } else {
