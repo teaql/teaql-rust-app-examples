@@ -252,12 +252,31 @@ impl App {
             })
             .collect();
 
-        result.sort_by(|a, b| {
+        // Deduplicate by match label: if fix_data created a real match with
+        // the same match_number as a seed match, keep the completed one
+        // (or the last one which is the fix_data entry).
+        let mut seen = std::collections::HashMap::new();
+        for (i, m) in result.iter().enumerate() {
+            let entry = seen.entry(m.label.clone()).or_insert(i);
+            // Prefer the completed match over a placeholder
+            if m.completed {
+                *entry = i;
+            }
+        }
+        let keep: std::collections::HashSet<usize> = seen.values().copied().collect();
+        let mut deduped: Vec<KnockoutMatchView> = result
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| keep.contains(i))
+            .map(|(_, m)| m)
+            .collect();
+
+        deduped.sort_by(|a, b| {
             a.stage_rank
                 .cmp(&b.stage_rank)
                 .then_with(|| a.label.cmp(&b.label))
         });
-        Ok(result)
+        Ok(deduped)
     }
 
     fn knockout_match_view(

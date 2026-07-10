@@ -346,6 +346,18 @@ async fn create_knockout_match(
         1003 => {
             m.update_match_stage_to_round_of16();
         }
+        1004 => {
+            m.update_match_stage_to_quarter_final();
+        }
+        1005 => {
+            m.update_match_stage_to_semi_final();
+        }
+        1006 => {
+            m.update_match_stage_to_third_place();
+        }
+        1007 => {
+            m.update_match_stage_to_final();
+        }
         _ => {
             m.update_match_stage_to_group();
         }
@@ -597,8 +609,49 @@ fn reported_knockout_fixtures() -> Vec<KnockoutFixture> {
         KnockoutFixture {
             match_number: 96,
             stage_id: 1003,
-            home: "Switzerland",
-            away: "Colombia",
+            home: "Colombia",
+            away: "Switzerland",
+            home_score: Some(0),
+            away_score: Some(0),
+            penalty_home: 3,
+            penalty_away: 4,
+        },
+        // Quarter Finals (M97-M100)
+        KnockoutFixture {
+            match_number: 97,
+            stage_id: 1004,
+            home: "France",
+            away: "Morocco",
+            home_score: Some(2),
+            away_score: Some(0),
+            penalty_home: 0,
+            penalty_away: 0,
+        },
+        KnockoutFixture {
+            match_number: 98,
+            stage_id: 1004,
+            home: "Spain",
+            away: "Belgium",
+            home_score: None,
+            away_score: None,
+            penalty_home: 0,
+            penalty_away: 0,
+        },
+        KnockoutFixture {
+            match_number: 99,
+            stage_id: 1004,
+            home: "Norway",
+            away: "England",
+            home_score: None,
+            away_score: None,
+            penalty_home: 0,
+            penalty_away: 0,
+        },
+        KnockoutFixture {
+            match_number: 100,
+            stage_id: 1004,
+            home: "Argentina",
+            away: "Switzerland",
             home_score: None,
             away_score: None,
             penalty_home: 0,
