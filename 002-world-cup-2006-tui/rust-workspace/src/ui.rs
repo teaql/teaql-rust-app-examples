@@ -247,12 +247,15 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         let mut spans: Vec<Span> = Vec::new();
 
         // Col 0: R32 match
+        // Emoji flags render ~1 col wider per flag in terminals than unicode-width reports.
+        // Match rows have 2 flags, so blank rows need extra padding to keep connectors aligned.
+        const FLAG_OFFSET: usize = 1;
         let mi = r / 2;
         if r % 2 == 0 && mi < r32.len() {
             let (text, style) = fmt_match(r32[mi], col0_w);
             spans.push(Span::styled(text, style));
         } else {
-            spans.push(Span::raw(" ".repeat(col0_w)));
+            spans.push(Span::raw(" ".repeat(col0_w + FLAG_OFFSET)));
         }
 
         spans.push(Span::raw("  "));
