@@ -105,19 +105,24 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         return;
     }
 
-    // Group by stage_rank, exclude Third Place (5) from the tree
+    // Group by stage_rank: 1=R32, 2=R16, 3=QF, 4=SF, 5=3rd, 6=Final
     let mut stages: BTreeMap<usize, Vec<&KnockoutMatchView>> = BTreeMap::new();
     for m in matches {
-        if m.stage_rank != 5 {
-            stages.entry(m.stage_rank).or_default().push(m);
-        }
+        stages.entry(m.stage_rank).or_default().push(m);
     }
 
-    let keys: Vec<usize> = stages.keys().copied().collect();
-    let ncols = keys.len();
+    // We show 4 columns: R32(1), R16(2), QF(3), SF(4)
+    // Then Final(6) and 3rd Place(5) as text at the bottom
+    let bracket_stages: Vec<usize> = vec![1, 2, 3, 4];
+    let stage_matches: Vec<Vec<&KnockoutMatchView>> = bracket_stages
+        .iter()
+        .map(|k| stages.get(k).cloned().unwrap_or_default())
+        .collect();
 
-    let r32 = stages.get(&1).map_or(0, |v| v.len());
-    if r32 == 0 {
+    let ncols = bracket_stages.len(); // 4
+
+    let r32_count = stage_matches[0].len(); // should be 16
+    if r32_count == 0 {
         let msg = Paragraph::new("No R32 matches found.")
             .style(Style::default().fg(Color::DarkGray))
             .block(get_block("Knockout Bracket".to_string(), active));
@@ -125,83 +130,134 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         return;
     }
 
-    let nrows = 2 * r32 - 1;
+    // Each match occupies 2 visual lines (home + away), with 1 gap line between matches in col 0.
+    // Total rows for column 0: r32_count * 2 + (r32_count - 1) * 1 = 3 * r32_count - 1
+    let nrows = 3 * r32_count - 1; // 47 for 16 matches
 
-    // Line positions: pos[stage_idx][match_idx] = line_number
-    // Formula: level L, match i → line = (2^L - 1) + i * 2^(L+1)
-    let mut pos: Vec<Vec<usize>> = Vec::new();
-    for (si, &key) in keys.iter().enumerate() {
-        let cnt = stages[&key].len();
-        let stride = 1 << (si + 1);
-        let offset = (1 << si) - 1;
-        pos.push((0..cnt).map(|i| offset + i * stride).collect());
+    // Compute the center line position for each match in each column.
+    // Column 0 (R32): match i at center = i * 3 + 0.5 → home at i*3, away at i*3+1
+    // Column 1 (R16): match j centered between R32[2j] and R32[2j+1]
+    // Column 2 (QF): match k centered between R16[2k] and R16[2k+1]
+    // Column 3 (SF): match l centered between QF[2l] and QF[2l+1]
+
+    // For each column, compute (home_line, away_line) for each match.
+    let mut match_lines: Vec<Vec<(usize, usize)>> = Vec::new();
+
+    // Col 0: R32
+    let col0: Vec<(usize, usize)> = (0..r32_count)
+        .map(|i| (i * 3, i * 3 + 1))
+        .collect();
+    match_lines.push(col0);
+
+    // Subsequent columns: centered between the two feeder matches from previous column
+    for col in 1..ncols {
+        let prev = &match_lines[col - 1];
+        let match_count = prev.len() / 2;
+        let cur: Vec<(usize, usize)> = (0..match_count)
+            .map(|j| {
+                let top_home = prev[2 * j].0;
+                let bot_away = prev[2 * j + 1].1;
+                let center = (top_home + bot_away) / 2;
+                // If center is even, home=center, away=center+1
+                // If odd, home=center, away=center+1
+                (center, center + 1)
+            })
+            .collect();
+        match_lines.push(cur);
     }
 
-    // Connectors between adjacent columns
-    #[derive(Clone, Copy)]
-    enum Conn {
-        E, // Empty
-        T, // Top: ─┐
-        M, // Mid: ├─
-        B, // Bottom: ─┘
-        V, // Vert: │
-    }
-    let mut cx: Vec<Vec<Conn>> = vec![vec![Conn::E; ncols.saturating_sub(1)]; nrows];
-
-    for c in 0..ncols.saturating_sub(1) {
-        for (j, &lm) in pos[c + 1].iter().enumerate() {
-            let lt = pos[c][2 * j];
-            let lb = pos[c][2 * j + 1];
-            if lt < nrows {
-                cx[lt][c] = Conn::T;
-            }
-            if lm < nrows {
-                cx[lm][c] = Conn::M;
-            }
-            if lb < nrows {
-                cx[lb][c] = Conn::B;
-            }
-            for l in (lt + 1)..lm {
-                if l < nrows {
-                    cx[l][c] = Conn::V;
-                }
-            }
-            for l in (lm + 1)..lb {
-                if l < nrows {
-                    cx[l][c] = Conn::V;
-                }
-            }
-        }
-    }
-
-    // Dynamic column width based on available space
-    let conn_w = 3usize;
-    let avail = area.width.saturating_sub(2) as usize; // subtract block borders
+    // Dynamic column width
+    let conn_w = 3_usize;
+    let avail = area.width.saturating_sub(2) as usize;
     let col_w = if ncols > 0 {
         let total_conn = conn_w * ncols.saturating_sub(1);
-        ((avail.saturating_sub(total_conn)) / ncols).max(12).min(30)
+        ((avail.saturating_sub(total_conn)) / ncols).max(14).min(24)
     } else {
-        22
+        18
     };
 
-    let stage_label = |k: usize| -> &str {
-        match k {
+    // Build the grid: for each row, each column can have content or empty
+    // Also build connector info between columns
+
+    let stage_label = |idx: usize| -> &str {
+        match bracket_stages[idx] {
             1 => "R32",
             2 => "R16",
             3 => "QF",
             4 => "SF",
-            6 => "Final",
             _ => "?",
         }
     };
+
+    // Format a team name for display
+    let fmt_team = |name: &str, col_w: usize| -> String {
+        let short = team_short(name);
+        // For R32 column, show longer names if possible
+        let parts: Vec<&str> = name.split_whitespace().collect();
+        let display = if parts.len() > 1 {
+            parts[1..].join(" ")
+        } else {
+            name.to_string()
+        };
+        if display.len() <= col_w.saturating_sub(6) {
+            display
+        } else {
+            short
+        }
+    };
+
+    // Precompute connector lines between columns
+    // For each row, between col c and c+1, we may have a connector
+    #[derive(Clone, Copy)]
+    enum Conn {
+        Empty,
+        TopCorner,    // ─┐
+        BottomCorner, // ─┘
+        Vert,         // │
+        MidRight,     // ├─
+    }
+
+    let mut connectors: Vec<Vec<Conn>> = vec![vec![Conn::Empty; ncols.saturating_sub(1)]; nrows + 2];
+
+    for c in 0..ncols.saturating_sub(1) {
+        let next = &match_lines[c + 1];
+        let prev = &match_lines[c];
+        for j in 0..next.len() {
+            // Next match j is fed by prev[2j] and prev[2j+1]
+            let top_away = prev[2 * j].1;     // away line of top feeder
+            let bot_away = prev[2 * j + 1].1; // away line of bottom feeder
+            let next_home = next[j].0;
+
+            // Top connector: from top_away row → ─┐
+            if top_away < nrows {
+                connectors[top_away][c] = Conn::TopCorner;
+            }
+            // Bottom connector: from bot_away row → ─┘
+            if bot_away < nrows {
+                connectors[bot_away][c] = Conn::BottomCorner;
+            }
+            // Mid connector: at next_home row → ├─
+            if next_home < nrows {
+                connectors[next_home][c] = Conn::MidRight;
+            }
+            // Vertical lines between top and bottom
+            let start = top_away + 1;
+            let end = bot_away;
+            for r in start..end {
+                if r < nrows && !matches!(connectors[r][c], Conn::MidRight) {
+                    connectors[r][c] = Conn::Vert;
+                }
+            }
+        }
+    }
 
     let mut lines: Vec<Line> = Vec::new();
 
     // Header row
     let mut hdr = Vec::new();
-    for (i, &k) in keys.iter().enumerate() {
+    for i in 0..ncols {
         hdr.push(Span::styled(
-            format!("{:^w$}", stage_label(k), w = col_w),
+            format!("{:^w$}", stage_label(i), w = col_w),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -212,7 +268,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     }
     lines.push(Line::from(hdr));
 
-    // Thin separator
+    // Separator
     let sep_len = col_w * ncols + conn_w * ncols.saturating_sub(1);
     lines.push(Line::from(Span::styled(
         "─".repeat(sep_len.min(avail)),
@@ -224,37 +280,79 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         let mut spans = Vec::new();
 
         for c in 0..ncols {
-            // Find match at this line in this column
-            let m_opt = pos[c]
-                .iter()
-                .position(|&p| p == r)
-                .map(|i| stages[&keys[c]][i]);
+            let sm = &stage_matches[c];
+            let ml = &match_lines[c];
 
-            if let Some(m) = m_opt {
-                let style = if m.completed {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
-                let h = team_short(&m.home);
-                let a = team_short(&m.away);
-                let text = format!("{:>6} {} {:<6}", h, m.score, a);
-                spans.push(Span::styled(
-                    format!("{:<w$}", text, w = col_w),
-                    style,
-                ));
-            } else {
+            // Check if this row has a team from this column
+            let mut found = false;
+            for (mi, (home_line, away_line)) in ml.iter().enumerate() {
+                if mi >= sm.len() {
+                    break;
+                }
+                let m = sm[mi];
+                if r == *home_line {
+                    // Home team line
+                    let name = fmt_team(&m.home, col_w);
+                    let is_winner = m.completed && m.winner.as_ref().map_or(false, |w| *w == m.home);
+                    let is_loser = m.completed && !is_winner;
+                    let style = if is_winner {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else if is_loser {
+                        Style::default().fg(Color::DarkGray)
+                    } else if m.home == "TBD" {
+                        Style::default().fg(Color::DarkGray)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    spans.push(Span::styled(
+                        format!("{:<w$}", name, w = col_w),
+                        style,
+                    ));
+                    found = true;
+                    break;
+                }
+                if r == *away_line {
+                    // Away team line — also show score on this line
+                    let name = fmt_team(&m.away, col_w);
+                    let is_winner = m.completed && m.winner.as_ref().map_or(false, |w| *w == m.away);
+                    let is_loser = m.completed && !is_winner;
+                    let style = if is_winner {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else if is_loser {
+                        Style::default().fg(Color::DarkGray)
+                    } else if m.away == "TBD" {
+                        Style::default().fg(Color::DarkGray)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    // Show score suffix if completed
+                    let score_suffix = if m.completed {
+                        format!(" {}", m.score)
+                    } else {
+                        String::new()
+                    };
+                    let display = format!("{}{}", name, score_suffix);
+                    spans.push(Span::styled(
+                        format!("{:<w$}", display, w = col_w),
+                        style,
+                    ));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
                 spans.push(Span::raw(" ".repeat(col_w)));
             }
 
-            // Connector between this column and the next
+            // Connector
             if c < ncols - 1 {
-                let (s, st) = match cx[r][c] {
-                    Conn::E => ("   ", Style::default()),
-                    Conn::T => (" ─┐", Style::default().fg(Color::DarkGray)),
-                    Conn::M => (" ├─", Style::default().fg(Color::DarkGray)),
-                    Conn::B => (" ─┘", Style::default().fg(Color::DarkGray)),
-                    Conn::V => (" │ ", Style::default().fg(Color::DarkGray)),
+                let (s, st) = match connectors[r][c] {
+                    Conn::Empty => ("   ", Style::default()),
+                    Conn::TopCorner => ("─┐ ", Style::default().fg(Color::DarkGray)),
+                    Conn::BottomCorner => ("─┘ ", Style::default().fg(Color::DarkGray)),
+                    Conn::MidRight => (" ├─", Style::default().fg(Color::DarkGray)),
+                    Conn::Vert => (" │ ", Style::default().fg(Color::DarkGray)),
                 };
                 spans.push(Span::styled(s, st));
             }
@@ -263,32 +361,51 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         lines.push(Line::from(spans));
     }
 
-    // Champion line
-    let champion = matches
-        .iter()
-        .find(|m| m.stage_rank == 6)
-        .and_then(|m| m.winner.clone())
-        .unwrap_or_else(|| "TBD".to_string());
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("🏆 Champion: {}", champion),
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    )));
+    // Final + 3rd Place at the bottom
+    let final_match = stages.get(&6).and_then(|v| v.first());
+    let third_match = stages.get(&5).and_then(|v| v.first());
 
-    // Projected matches have score "vs", actual matches have real scores
-    let is_projected = !matches.is_empty() && matches.iter().all(|m| m.score == "vs");
+    lines.push(Line::from(""));
+
+    if let Some(fm) = final_match {
+        let champion_text = fm.winner.as_deref().unwrap_or("TBD");
+        lines.push(Line::from(vec![
+            Span::styled("🏆 Final: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{} {} {}", fm.home, fm.score, fm.away),
+                if fm.completed {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+            Span::styled(
+                format!("  Champion: {}", champion_text),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
+    if let Some(tm) = third_match {
+        lines.push(Line::from(vec![
+            Span::styled("🥉 3rd:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{} {} {}", tm.home, tm.score, tm.away),
+                if tm.completed {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+        ]));
+    }
+
     let completed_count = matches.iter().filter(|m| m.completed).count();
-    let title = if is_projected {
-        format!("Projected Bracket (from standings)")
-    } else {
-        format!(
-            "Knockout Results  {}/{} completed",
-            completed_count,
-            matches.len()
-        )
-    };
+    let title = format!(
+        "Knockout Bracket  {}/{} completed",
+        completed_count,
+        matches.len()
+    );
     let tree = Paragraph::new(lines).block(get_block(title, active));
     f.render_widget(tree, area);
 }
