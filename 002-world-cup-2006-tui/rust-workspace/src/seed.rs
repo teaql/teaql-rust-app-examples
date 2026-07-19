@@ -229,11 +229,31 @@ pub async fn seed_data(ctx: &UserContext) -> Result<(), Box<dyn std::error::Erro
     }
 
     let shell_rounds = vec![
-        ShellRound { count: 8, match_number_start: 89, stage: "R16" },
-        ShellRound { count: 4, match_number_start: 97, stage: "QF" },
-        ShellRound { count: 2, match_number_start: 101, stage: "SF" },
-        ShellRound { count: 1, match_number_start: 103, stage: "3RD" },
-        ShellRound { count: 1, match_number_start: 104, stage: "FINAL" },
+        ShellRound {
+            count: 8,
+            match_number_start: 89,
+            stage: "R16",
+        },
+        ShellRound {
+            count: 4,
+            match_number_start: 97,
+            stage: "QF",
+        },
+        ShellRound {
+            count: 2,
+            match_number_start: 101,
+            stage: "SF",
+        },
+        ShellRound {
+            count: 1,
+            match_number_start: 103,
+            stage: "3RD",
+        },
+        ShellRound {
+            count: 1,
+            match_number_start: 104,
+            stage: "FINAL",
+        },
     ];
 
     for round in &shell_rounds {
@@ -258,11 +278,21 @@ pub async fn seed_data(ctx: &UserContext) -> Result<(), Box<dyn std::error::Erro
             m.update_tournament_id(t_id);
 
             match round.stage {
-                "R16" => { m.update_match_stage_to_round_of16(); }
-                "QF" => { m.update_match_stage_to_quarter_final(); }
-                "SF" => { m.update_match_stage_to_semi_final(); }
-                "3RD" => { m.update_match_stage_to_third_place(); }
-                "FINAL" => { m.update_match_stage_to_final(); }
+                "R16" => {
+                    m.update_match_stage_to_round_of16();
+                }
+                "QF" => {
+                    m.update_match_stage_to_quarter_final();
+                }
+                "SF" => {
+                    m.update_match_stage_to_semi_final();
+                }
+                "3RD" => {
+                    m.update_match_stage_to_third_place();
+                }
+                "FINAL" => {
+                    m.update_match_stage_to_final();
+                }
                 _ => {}
             }
             m.update_match_status_to_scheduled();

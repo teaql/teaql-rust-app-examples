@@ -324,8 +324,11 @@ pub fn projected_round_of_32(standings: &[GroupStandingRow]) -> Vec<ProjectedKno
             .then(b.4.cmp(&a.4))
             .then(a.0.cmp(&b.0))
     });
-    let qualified_thirds: Vec<(String, String)> =
-        third_place.into_iter().take(8).map(|(g, t, _, _, _)| (g, t)).collect();
+    let qualified_thirds: Vec<(String, String)> = third_place
+        .into_iter()
+        .take(8)
+        .map(|(g, t, _, _, _)| (g, t))
+        .collect();
 
     // FIFA 48-team bracket: assign all 32 teams to positions 4..35
     // Group winners: positions 4-15 (A=4, B=5, ..., L=15)
@@ -627,8 +630,7 @@ mod tests {
     ) -> KnockoutBracketMatch {
         KnockoutBracketMatch {
             match_number,
-            stage: KnockoutStage::from_match_number(match_number)
-                .unwrap_or(KnockoutStage::R32),
+            stage: KnockoutStage::from_match_number(match_number).unwrap_or(KnockoutStage::R32),
             home_team_id: home_id,
             away_team_id: away_id,
             home_score,
@@ -649,8 +651,7 @@ mod tests {
     ) -> KnockoutBracketMatch {
         KnockoutBracketMatch {
             match_number,
-            stage: KnockoutStage::from_match_number(match_number)
-                .unwrap_or(KnockoutStage::R32),
+            stage: KnockoutStage::from_match_number(match_number).unwrap_or(KnockoutStage::R32),
             home_team_id: home_id,
             away_team_id: away_id,
             home_score,
@@ -772,16 +773,11 @@ mod tests {
     #[test]
     fn reported_completed_round_of_32_results_have_sixteen_winners() {
         let results = reported_round_of_32_results();
-        assert_eq!(
-            completed_knockout_winners(&results).len(),
-            16
-        );
+        assert_eq!(completed_knockout_winners(&results).len(), 16);
         // The 3 penalty-decided matches (scores are tied, winner set explicitly)
         let mut penalty_winners: Vec<String> = results
             .iter()
-            .filter(|r| {
-                r.home_score == r.away_score && r.winner.is_some()
-            })
+            .filter(|r| r.home_score == r.away_score && r.winner.is_some())
             .filter_map(|r| r.winner.clone())
             .collect();
         penalty_winners.sort();
@@ -888,8 +884,16 @@ mod tests {
         for r16_n in 89..=96 {
             let home_count = r16_slots.iter().filter(|s| s.0 == r16_n && s.1).count();
             let away_count = r16_slots.iter().filter(|s| s.0 == r16_n && !s.1).count();
-            assert_eq!(home_count, 1, "R16 match {} should have 1 home feeder", r16_n);
-            assert_eq!(away_count, 1, "R16 match {} should have 1 away feeder", r16_n);
+            assert_eq!(
+                home_count, 1,
+                "R16 match {} should have 1 home feeder",
+                r16_n
+            );
+            assert_eq!(
+                away_count, 1,
+                "R16 match {} should have 1 away feeder",
+                r16_n
+            );
         }
     }
 
@@ -1015,9 +1019,7 @@ mod tests {
 
     #[test]
     fn compute_advancements_penalty_win() {
-        let matches = vec![
-            bracket_match_with_penalties(73, 1, 32, 1, 1, 4, 2),
-        ];
+        let matches = vec![bracket_match_with_penalties(73, 1, 32, 1, 1, 4, 2)];
         let adv = compute_advancements(&matches);
         assert_eq!(adv.len(), 1);
         assert_eq!(adv[0], (89, true, 1));
@@ -1074,47 +1076,68 @@ mod tests {
             all_matches.push(bracket_match(match_number, home_id, away_id, 2, 0));
         }
         let r32_adv = compute_advancements(&all_matches);
-        let mut r16_matches: Vec<KnockoutBracketMatch> = (89..=96)
-            .map(|n| empty_bracket_match(n))
-            .collect();
+        let mut r16_matches: Vec<KnockoutBracketMatch> =
+            (89..=96).map(|n| empty_bracket_match(n)).collect();
         for (target, is_home, team_id) in &r32_adv {
             if let Some(m) = r16_matches.iter_mut().find(|m| m.match_number == *target) {
-                if *is_home { m.home_team_id = *team_id; } else { m.away_team_id = *team_id; }
+                if *is_home {
+                    m.home_team_id = *team_id;
+                } else {
+                    m.away_team_id = *team_id;
+                }
             }
         }
         for m in r16_matches.iter_mut() {
             if m.home_team_id != 0 && m.away_team_id != 0 {
-                if m.home_team_id < m.away_team_id { m.home_score = 2; } else { m.away_score = 2; }
+                if m.home_team_id < m.away_team_id {
+                    m.home_score = 2;
+                } else {
+                    m.away_score = 2;
+                }
             }
         }
         all_matches.extend(r16_matches.iter().cloned());
         let r16_adv = compute_advancements(&r16_matches);
-        let mut qf_matches: Vec<KnockoutBracketMatch> = (97..=100)
-            .map(|n| empty_bracket_match(n))
-            .collect();
+        let mut qf_matches: Vec<KnockoutBracketMatch> =
+            (97..=100).map(|n| empty_bracket_match(n)).collect();
         for (target, is_home, team_id) in &r16_adv {
             if let Some(m) = qf_matches.iter_mut().find(|m| m.match_number == *target) {
-                if *is_home { m.home_team_id = *team_id; } else { m.away_team_id = *team_id; }
+                if *is_home {
+                    m.home_team_id = *team_id;
+                } else {
+                    m.away_team_id = *team_id;
+                }
             }
         }
         for m in qf_matches.iter_mut() {
             if m.home_team_id != 0 && m.away_team_id != 0 {
-                if m.home_team_id < m.away_team_id { m.home_score = 2; } else { m.away_score = 2; }
+                if m.home_team_id < m.away_team_id {
+                    m.home_score = 2;
+                } else {
+                    m.away_score = 2;
+                }
             }
         }
         all_matches.extend(qf_matches.iter().cloned());
         let qf_adv = compute_advancements(&qf_matches);
-        let mut sf_matches: Vec<KnockoutBracketMatch> = (101..=102)
-            .map(|n| empty_bracket_match(n))
-            .collect();
+        let mut sf_matches: Vec<KnockoutBracketMatch> =
+            (101..=102).map(|n| empty_bracket_match(n)).collect();
         for (target, is_home, team_id) in &qf_adv {
             if let Some(m) = sf_matches.iter_mut().find(|m| m.match_number == *target) {
-                if *is_home { m.home_team_id = *team_id; } else { m.away_team_id = *team_id; }
+                if *is_home {
+                    m.home_team_id = *team_id;
+                } else {
+                    m.away_team_id = *team_id;
+                }
             }
         }
         for m in sf_matches.iter_mut() {
             if m.home_team_id != 0 && m.away_team_id != 0 {
-                if m.home_team_id < m.away_team_id { m.home_score = 2; } else { m.away_score = 2; }
+                if m.home_team_id < m.away_team_id {
+                    m.home_score = 2;
+                } else {
+                    m.away_score = 2;
+                }
             }
         }
         all_matches.extend(sf_matches.iter().cloned());
@@ -1122,39 +1145,86 @@ mod tests {
         let mut final_match = empty_bracket_match(104);
         let mut third_match = empty_bracket_match(103);
         for (target, is_home, team_id) in &sf_adv {
-            let m = if *target == 104 { &mut final_match } else { &mut third_match };
-            if *is_home { m.home_team_id = *team_id; } else { m.away_team_id = *team_id; }
+            let m = if *target == 104 {
+                &mut final_match
+            } else {
+                &mut third_match
+            };
+            if *is_home {
+                m.home_team_id = *team_id;
+            } else {
+                m.away_team_id = *team_id;
+            }
         }
-        assert!(final_match.home_team_id == 1 || final_match.away_team_id == 1,
+        assert!(
+            final_match.home_team_id == 1 || final_match.away_team_id == 1,
             "Team 1 (best seed) should reach the final, got home={} away={}",
-            final_match.home_team_id, final_match.away_team_id);
+            final_match.home_team_id,
+            final_match.away_team_id
+        );
         // Both finalists must be filled
-        assert!(final_match.home_team_id != 0 && final_match.away_team_id != 0,
-            "Both final slots should be filled");
+        assert!(
+            final_match.home_team_id != 0 && final_match.away_team_id != 0,
+            "Both final slots should be filled"
+        );
         // Third place match should have two different non-zero teams
-        assert!(third_match.home_team_id != 0 && third_match.away_team_id != 0,
-            "Both third place slots should be filled");
-        assert_ne!(third_match.home_team_id, third_match.away_team_id,
-            "Third place teams should be different");
+        assert!(
+            third_match.home_team_id != 0 && third_match.away_team_id != 0,
+            "Both third place slots should be filled"
+        );
+        assert_ne!(
+            third_match.home_team_id, third_match.away_team_id,
+            "Third place teams should be different"
+        );
         // The 4 semi-final outputs should be disjoint from each other
         let mut all_four = vec![
-            final_match.home_team_id, final_match.away_team_id,
-            third_match.home_team_id, third_match.away_team_id,
+            final_match.home_team_id,
+            final_match.away_team_id,
+            third_match.home_team_id,
+            third_match.away_team_id,
         ];
         all_four.sort();
         all_four.dedup();
-        assert_eq!(all_four.len(), 4, "Final + 3rd place should have 4 distinct teams");
+        assert_eq!(
+            all_four.len(),
+            4,
+            "Final + 3rd place should have 4 distinct teams"
+        );
     }
 
     #[test]
     fn stage_from_match_number_covers_all_ranges() {
-        for n in 73..=88 { assert_eq!(KnockoutStage::from_match_number(n), Some(KnockoutStage::R32)); }
-        for n in 89..=96 { assert_eq!(KnockoutStage::from_match_number(n), Some(KnockoutStage::R16)); }
-        for n in 97..=100 { assert_eq!(KnockoutStage::from_match_number(n), Some(KnockoutStage::QF)); }
-        assert_eq!(KnockoutStage::from_match_number(101), Some(KnockoutStage::SF));
-        assert_eq!(KnockoutStage::from_match_number(102), Some(KnockoutStage::SF));
-        assert_eq!(KnockoutStage::from_match_number(103), Some(KnockoutStage::ThirdPlace));
-        assert_eq!(KnockoutStage::from_match_number(104), Some(KnockoutStage::Final));
+        for n in 73..=88 {
+            assert_eq!(
+                KnockoutStage::from_match_number(n),
+                Some(KnockoutStage::R32)
+            );
+        }
+        for n in 89..=96 {
+            assert_eq!(
+                KnockoutStage::from_match_number(n),
+                Some(KnockoutStage::R16)
+            );
+        }
+        for n in 97..=100 {
+            assert_eq!(KnockoutStage::from_match_number(n), Some(KnockoutStage::QF));
+        }
+        assert_eq!(
+            KnockoutStage::from_match_number(101),
+            Some(KnockoutStage::SF)
+        );
+        assert_eq!(
+            KnockoutStage::from_match_number(102),
+            Some(KnockoutStage::SF)
+        );
+        assert_eq!(
+            KnockoutStage::from_match_number(103),
+            Some(KnockoutStage::ThirdPlace)
+        );
+        assert_eq!(
+            KnockoutStage::from_match_number(104),
+            Some(KnockoutStage::Final)
+        );
         assert_eq!(KnockoutStage::from_match_number(72), None);
         assert_eq!(KnockoutStage::from_match_number(105), None);
     }
@@ -1196,22 +1266,22 @@ mod tests {
     /// M88    Colombia      Ghana          1-0         Colombia
     fn real_r32_bracket() -> Vec<KnockoutBracketMatch> {
         vec![
-            bracket_match(73, 101, 201, 1, 0),                        // Canada 1-0 South Africa
-            bracket_match(74, 102, 202, 3, 0),                        // France 3-0 Sweden
-            bracket_match_with_penalties(75, 103, 203, 1, 1, 4, 3),   // Paraguay 1-1 Germany p4-3
-            bracket_match_with_penalties(76, 104, 204, 1, 1, 3, 2),   // Morocco 1-1 Netherlands p3-2
-            bracket_match(77, 105, 205, 2, 1),                        // Norway 2-1 Ivory Coast
-            bracket_match(78, 106, 206, 2, 1),                        // England 2-1 DR Congo
-            bracket_match(79, 107, 207, 2, 0),                        // Mexico 2-0 Ecuador
-            bracket_match(80, 108, 208, 2, 1),                        // Brazil 2-1 Japan
-            bracket_match(81, 109, 209, 3, 2),                        // Belgium 3-2 Senegal
-            bracket_match(82, 110, 210, 2, 0),                        // USA 2-0 Bosnia
-            bracket_match(83, 111, 211, 3, 0),                        // Spain 3-0 Austria
-            bracket_match(84, 112, 212, 2, 1),                        // Portugal 2-1 Croatia
-            bracket_match(85, 113, 213, 2, 0),                        // Switzerland 2-0 Algeria
-            bracket_match_with_penalties(86, 114, 214, 1, 1, 4, 2),   // Egypt 1-1 Australia p4-2
-            bracket_match(87, 115, 215, 3, 2),                        // Argentina 3-2 Cape Verde
-            bracket_match(88, 116, 216, 1, 0),                        // Colombia 1-0 Ghana
+            bracket_match(73, 101, 201, 1, 0), // Canada 1-0 South Africa
+            bracket_match(74, 102, 202, 3, 0), // France 3-0 Sweden
+            bracket_match_with_penalties(75, 103, 203, 1, 1, 4, 3), // Paraguay 1-1 Germany p4-3
+            bracket_match_with_penalties(76, 104, 204, 1, 1, 3, 2), // Morocco 1-1 Netherlands p3-2
+            bracket_match(77, 105, 205, 2, 1), // Norway 2-1 Ivory Coast
+            bracket_match(78, 106, 206, 2, 1), // England 2-1 DR Congo
+            bracket_match(79, 107, 207, 2, 0), // Mexico 2-0 Ecuador
+            bracket_match(80, 108, 208, 2, 1), // Brazil 2-1 Japan
+            bracket_match(81, 109, 209, 3, 2), // Belgium 3-2 Senegal
+            bracket_match(82, 110, 210, 2, 0), // USA 2-0 Bosnia
+            bracket_match(83, 111, 211, 3, 0), // Spain 3-0 Austria
+            bracket_match(84, 112, 212, 2, 1), // Portugal 2-1 Croatia
+            bracket_match(85, 113, 213, 2, 0), // Switzerland 2-0 Algeria
+            bracket_match_with_penalties(86, 114, 214, 1, 1, 4, 2), // Egypt 1-1 Australia p4-2
+            bracket_match(87, 115, 215, 3, 2), // Argentina 3-2 Cape Verde
+            bracket_match(88, 116, 216, 1, 0), // Colombia 1-0 Ghana
         ]
     }
 
@@ -1307,10 +1377,22 @@ mod tests {
         teams_16.sort();
 
         let mut expected = sorted_names([
-            "Canada", "France", "Paraguay", "Morocco",
-            "Norway", "England", "Mexico", "Brazil",
-            "Belgium", "United States", "Spain", "Portugal",
-            "Switzerland", "Egypt", "Argentina", "Colombia",
+            "Canada",
+            "France",
+            "Paraguay",
+            "Morocco",
+            "Norway",
+            "England",
+            "Mexico",
+            "Brazil",
+            "Belgium",
+            "United States",
+            "Spain",
+            "Portugal",
+            "Switzerland",
+            "Egypt",
+            "Argentina",
+            "Colombia",
         ]);
         expected.sort();
 
@@ -1323,15 +1405,18 @@ mod tests {
         let r16 = real_r16_results();
         assert_eq!(r16.len(), 8, "Expected 8 R16 results");
 
-        let winners: Vec<&str> = r16
-            .iter()
-            .map(|r| r.winner.as_deref().unwrap())
-            .collect();
+        let winners: Vec<&str> = r16.iter().map(|r| r.winner.as_deref().unwrap()).collect();
 
         // All 8 R16 matches are now completed
         let expected = vec![
-            "France", "Morocco", "Spain", "Belgium",
-            "Norway", "England", "Argentina", "Switzerland",
+            "France",
+            "Morocco",
+            "Spain",
+            "Belgium",
+            "Norway",
+            "England",
+            "Argentina",
+            "Switzerland",
         ];
         assert_eq!(winners, expected, "8强 (QF participants) in match order");
     }
@@ -1390,17 +1475,35 @@ mod tests {
 
         // Verify 16强 (all 16 R32 winners)
         let r32_winners = sorted_names([
-            "Canada", "France", "Paraguay", "Morocco",
-            "Norway", "England", "Mexico", "Brazil",
-            "Belgium", "United States", "Spain", "Portugal",
-            "Switzerland", "Egypt", "Argentina", "Colombia",
+            "Canada",
+            "France",
+            "Paraguay",
+            "Morocco",
+            "Norway",
+            "England",
+            "Mexico",
+            "Brazil",
+            "Belgium",
+            "United States",
+            "Spain",
+            "Portugal",
+            "Switzerland",
+            "Egypt",
+            "Argentina",
+            "Colombia",
         ]);
         assert_eq!(r32_winners.len(), 16);
 
         // Verify 8强 (all 8 R16 winners)
         let r16_winners = sorted_names([
-            "France", "Morocco", "Spain", "Belgium",
-            "Norway", "England", "Argentina", "Switzerland",
+            "France",
+            "Morocco",
+            "Spain",
+            "Belgium",
+            "Norway",
+            "England",
+            "Argentina",
+            "Switzerland",
         ]);
         assert_eq!(r16_winners.len(), 8);
 
@@ -1433,7 +1536,11 @@ mod tests {
             .filter(|m| m.penalty_home > 0 || m.penalty_away > 0)
             .map(|m| m.match_number)
             .collect();
-        assert_eq!(penalty_matches, vec![75, 76, 86], "M75 M76 M86 went to penalties");
+        assert_eq!(
+            penalty_matches,
+            vec![75, 76, 86],
+            "M75 M76 M86 went to penalties"
+        );
 
         // Verify penalty winners
         assert_eq!(knockout_match_winner(&r32[2]), Some(103)); // Paraguay beat Germany

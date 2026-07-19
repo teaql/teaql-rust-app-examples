@@ -4,6 +4,8 @@ A high-performance, interactive command-line application built in Rust to displa
 
 This project is a native Rust port of the original Java implementation, powered by the **TeaQL** data engine and **SQLite**. It compiles into a standalone, ultra-minimal native executable (less than 7MB), achieving zero cold-start overhead and lightning-fast execution without requiring a JVM or any external runtime dependencies.
 
+![World Cup 2026 Bracket Tree Screenshot](assets/screenshot-bracket.png)
+
 ## Features ✨
 * **Interactive CLI Shell:** Full REPL experience with `wc2026>` prompt.
 * **Groups View:** View all groups (A-L) with flawless text alignment, emojis, and dynamic color-coding.
