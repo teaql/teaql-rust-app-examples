@@ -97,7 +97,11 @@ pub fn team_short(name: &str) -> String {
         "Czech Republic" => "CZE".to_string(),
         other => {
             let s = other.split_whitespace().last().unwrap_or("?").to_string();
-            if s.len() > 12 { s[..12].to_string() } else { s }
+            if s.len() > 12 {
+                s[..12].to_string()
+            } else {
+                s
+            }
         }
     }
 }
@@ -133,6 +137,8 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     let r32 = stages.get(&1).cloned().unwrap_or_default();
     let r16 = stages.get(&2).cloned().unwrap_or_default();
     let qf = stages.get(&3).cloned().unwrap_or_default();
+    let sf = stages.get(&4).cloned().unwrap_or_default();
+    let f_m = stages.get(&6).cloned().unwrap_or_default();
 
     let r32_count = r32.len();
     if r32_count == 0 {
@@ -159,6 +165,16 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         .map(|k| (col2_pos[2 * k] + col2_pos[2 * k + 1]) / 2)
         .collect();
 
+    // Col 4 (Final): centered between pairs from col 3
+    let col4_pos: Vec<usize> = (0..col3_pos.len() / 2)
+        .map(|k| (col3_pos[2 * k] + col3_pos[2 * k + 1]) / 2)
+        .collect();
+
+    // Col 5 (Champ): centered between pairs from col 4
+    let col5_pos: Vec<usize> = (0..col4_pos.len() / 2)
+        .map(|k| (col4_pos[2 * k] + col4_pos[2 * k + 1]) / 2)
+        .collect();
+
     // Winner name lists
     let winner_short = |m: &KnockoutMatchView| -> String {
         m.winner
@@ -178,12 +194,13 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
             _ => "TBD".to_string(),
         }
     };
-    let col2_names: Vec<String> = r16.iter().map(|m| {
-        match &m.winner {
+    let col2_names: Vec<String> = r16
+        .iter()
+        .map(|m| match &m.winner {
             Some(w) => team_short(w),
             None => format!("? {}", r16_date(m)),
-        }
-    }).collect();
+        })
+        .collect();
     // SF column: show "? date" when QF winner is unknown
     // Date = when QF match finishes (determines who advances to SF)
     let qf_date = |m: &KnockoutMatchView| -> String {
@@ -194,12 +211,41 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
             _ => "TBD".to_string(),
         }
     };
-    let col3_names: Vec<String> = qf.iter().map(|m| {
-        match &m.winner {
+    let col3_names: Vec<String> = qf
+        .iter()
+        .map(|m| match &m.winner {
             Some(w) => team_short(w),
             None => format!("? {}", qf_date(m)),
+        })
+        .collect();
+
+    let sf_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M101" | "M102" => "7/15".to_string(),
+            _ => "TBD".to_string(),
         }
-    }).collect();
+    };
+    let col4_names: Vec<String> = sf
+        .iter()
+        .map(|m| match &m.winner {
+            Some(w) => team_short(w),
+            None => format!("? {}", sf_date(m)),
+        })
+        .collect();
+
+    let f_date = |m: &KnockoutMatchView| -> String {
+        match m.label.as_str() {
+            "M104" => "7/19".to_string(),
+            _ => "TBD".to_string(),
+        }
+    };
+    let col5_names: Vec<String> = f_m
+        .iter()
+        .map(|m| match &m.winner {
+            Some(w) => team_short(w),
+            None => format!("? {}", f_date(m)),
+        })
+        .collect();
 
     // Connectors
     #[derive(Clone, Copy, PartialEq)]
@@ -217,11 +263,19 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
             let t = src[2 * j];
             let b = src[2 * j + 1];
             let m = dst[j];
-            if t < n { c[t] = Conn::Top; }
-            if b < n { c[b] = Conn::Bot; }
-            if m < n { c[m] = Conn::Mid; }
+            if t < n {
+                c[t] = Conn::Top;
+            }
+            if b < n {
+                c[b] = Conn::Bot;
+            }
+            if m < n {
+                c[m] = Conn::Mid;
+            }
             for r in (t + 1)..b {
-                if r < n && c[r] == Conn::Empty { c[r] = Conn::Vert; }
+                if r < n && c[r] == Conn::Empty {
+                    c[r] = Conn::Vert;
+                }
             }
         }
         c
@@ -229,14 +283,18 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 
     let conn12 = build_conn(&col1_pos, &col2_pos, nrows);
     let conn23 = build_conn(&col2_pos, &col3_pos, nrows);
+    let conn34 = build_conn(&col3_pos, &col4_pos, nrows);
+    let conn45 = build_conn(&col4_pos, &col5_pos, nrows);
 
     // Column widths
     let avail = area.width.saturating_sub(2) as usize;
     let cw = 2_usize; // connector width
-    // col0 (match) + gap + col1 + conn + col2 + conn + col3
-    let col0_w = ((avail.saturating_sub(cw * 2 + 2)) * 38 / 100).max(16).min(24);
-    let rest = avail.saturating_sub(col0_w + cw * 2 + 2);
-    let sw = (rest / 3).max(4).min(12);
+                      // col0 (match) + gap + col1 + conn + col2 + conn + col3 + conn + col4 + conn + col5
+    let col0_w = ((avail.saturating_sub(cw * 4 + 2)) * 25 / 100)
+        .max(14)
+        .min(24);
+    let rest = avail.saturating_sub(col0_w + cw * 4 + 2);
+    let sw = (rest / 5).max(4).min(10);
 
     // Format match line using flag emojis: "🇨🇦 1-0 🇿🇦"
     let fmt_match = |m: &KnockoutMatchView, w: usize| -> (String, Style) {
@@ -255,16 +313,50 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 
     // Header
     lines.push(Line::from(vec![
-        Span::styled(pad_right("R32", col0_w), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            pad_right("R32", col0_w),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
-        Span::styled(pad_right("R16", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            pad_right("R16", sw),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
-        Span::styled(pad_right("QF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            pad_right("QF", sw),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
-        Span::styled(pad_right("SF", sw), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            pad_right("SF", sw),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            pad_right("Final", sw),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            pad_right("Champ", sw),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
     lines.push(Line::from(Span::styled(
-        "─".repeat((col0_w + sw * 3 + cw * 2 + 2).min(avail)),
+        "─".repeat((col0_w + sw * 5 + cw * 4 + 2).min(avail)),
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -276,7 +368,7 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         // Col 0: R32 match
         // Emoji flags render slightly wider in terminals than unicode-width reports.
         // Match rows have 2 flags → blank rows need +1 extra padding to keep connectors aligned.
-        const FLAG_OFFSET: usize = 1;
+        const FLAG_OFFSET: usize = 0;
         let mi = r / 2;
         if r % 2 == 0 && mi < r32.len() {
             let (text, style) = fmt_match(r32[mi], col0_w);
@@ -291,7 +383,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         if let Some(idx) = col1_pos.iter().position(|&p| p == r) {
             if idx < col1_names.len() {
                 let n = &col1_names[idx];
-                let st = if n == "---" { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Green) };
+                let st = if n == "---" {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default().fg(Color::Green)
+                };
                 spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
             } else {
                 spans.push(Span::raw(" ".repeat(sw)));
@@ -302,13 +398,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
 
         // Connector 1→2
         let (cs, cst) = match conn12[r] {
-            Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
-            Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
-            Conn::Mid   => ("├─", Style::default().fg(Color::DarkGray)),
-            Conn::Vert if is_match_row => ("  │", Style::default().fg(Color::DarkGray)),
-            Conn::Vert  => (" │", Style::default().fg(Color::DarkGray)),
-            Conn::Empty if is_match_row => ("   ", Style::default()),
-            Conn::Empty => ("  ", Style::default()),
+            Conn::Top => ("─┐ ", Style::default().fg(Color::DarkGray)),
+            Conn::Bot => ("─┘ ", Style::default().fg(Color::DarkGray)),
+            Conn::Mid => (" ├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert => (" │ ", Style::default().fg(Color::DarkGray)),
+            Conn::Empty => ("   ", Style::default()),
         };
         spans.push(Span::styled(cs, cst));
 
@@ -316,7 +410,11 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         if let Some(idx) = col2_pos.iter().position(|&p| p == r) {
             if idx < col2_names.len() {
                 let n = &col2_names[idx];
-                let st = if n.starts_with("?") { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Cyan) };
+                let st = if n.starts_with("?") {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
                 spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
             } else {
                 spans.push(Span::raw(" ".repeat(sw)));
@@ -326,17 +424,13 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         }
 
         // Connector 2→3
-        // On match rows (even), col0 has emoji flags that render wider, but FLAG_OFFSET
-        // only pads blank rows. So conn23 Vert (│) on match rows needs an extra space
-        // to align with conn23 Top/Mid/Bot on blank rows.
+        // Standardized 3-char wide connector block for consistent alignment
         let (cs2, cst2) = match conn23[r] {
-            Conn::Top   => ("─┐", Style::default().fg(Color::DarkGray)),
-            Conn::Bot   => ("─┘", Style::default().fg(Color::DarkGray)),
-            Conn::Mid   => (" ├─", Style::default().fg(Color::DarkGray)),
-            Conn::Vert if is_match_row => ("  │", Style::default().fg(Color::DarkGray)),
-            Conn::Vert  => (" │", Style::default().fg(Color::DarkGray)),
-            Conn::Empty if is_match_row => ("   ", Style::default()),
-            Conn::Empty => ("  ", Style::default()),
+            Conn::Top => ("─┐ ", Style::default().fg(Color::DarkGray)),
+            Conn::Bot => ("─┘ ", Style::default().fg(Color::DarkGray)),
+            Conn::Mid => (" ├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert => (" │ ", Style::default().fg(Color::DarkGray)),
+            Conn::Empty => ("   ", Style::default()),
         };
         spans.push(Span::styled(cs2, cst2));
 
@@ -344,7 +438,69 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
         if let Some(idx) = col3_pos.iter().position(|&p| p == r) {
             if idx < col3_names.len() {
                 let n = &col3_names[idx];
-                let st = if n.starts_with("?") { Style::default().fg(Color::DarkGray) } else { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) };
+                let st = if n.starts_with("?") {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                };
+                spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
+            } else {
+                spans.push(Span::raw(" ".repeat(sw)));
+            }
+        } else {
+            spans.push(Span::raw(" ".repeat(sw)));
+        }
+
+        // Connector 3→4
+        let (cs3, cst3) = match conn34[r] {
+            Conn::Top => ("─┐ ", Style::default().fg(Color::DarkGray)),
+            Conn::Bot => ("─┘ ", Style::default().fg(Color::DarkGray)),
+            Conn::Mid => (" ├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert => (" │ ", Style::default().fg(Color::DarkGray)),
+            Conn::Empty => ("   ", Style::default()),
+        };
+        spans.push(Span::styled(cs3, cst3));
+
+        // Col 4: Final
+        if let Some(idx) = col4_pos.iter().position(|&p| p == r) {
+            if idx < col4_names.len() {
+                let n = &col4_names[idx];
+                let st = if n.starts_with("?") {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                };
+                spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
+            } else {
+                spans.push(Span::raw(" ".repeat(sw)));
+            }
+        } else {
+            spans.push(Span::raw(" ".repeat(sw)));
+        }
+
+        // Connector 4→5
+        let (cs4, cst4) = match conn45[r] {
+            Conn::Top => ("─┐ ", Style::default().fg(Color::DarkGray)),
+            Conn::Bot => ("─┘ ", Style::default().fg(Color::DarkGray)),
+            Conn::Mid => (" ├─", Style::default().fg(Color::DarkGray)),
+            Conn::Vert => (" │ ", Style::default().fg(Color::DarkGray)),
+            Conn::Empty => ("   ", Style::default()),
+        };
+        spans.push(Span::styled(cs4, cst4));
+
+        // Col 5: Champ
+        if let Some(idx) = col5_pos.iter().position(|&p| p == r) {
+            if idx < col5_names.len() {
+                let n = &col5_names[idx];
+                let st = if n.starts_with("?") {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD)
+                };
                 spans.push(Span::styled(format!("{:<w$}", n, w = sw), st));
             } else {
                 spans.push(Span::raw(" ".repeat(sw)));
@@ -364,20 +520,48 @@ fn render_bracket_tree(f: &mut Frame, matches: &[KnockoutMatchView], area: Rect,
     if let Some(fm) = final_m {
         let champ = fm.winner.as_deref().unwrap_or("TBD");
         lines.push(Line::from(vec![
-            Span::styled("🏆 Final: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!("{} {} {}", team_short(&fm.home), fm.score, team_short(&fm.away)),
-                if fm.completed { Style::default().fg(Color::Green) } else { Style::default().fg(Color::White) },
+                "🏆 Final: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!("  Champion: {}", champ), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(
+                    "{} {} {}",
+                    team_short(&fm.home),
+                    fm.score,
+                    team_short(&fm.away)
+                ),
+                if fm.completed {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+            Span::styled(
+                format!("  Champion: {}", champ),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
     if let Some(tm) = third_m {
         lines.push(Line::from(vec![
             Span::styled("🥉 3rd:   ", Style::default().fg(Color::Cyan)),
             Span::styled(
-                format!("{} {} {}", team_short(&tm.home), tm.score, team_short(&tm.away)),
-                if tm.completed { Style::default().fg(Color::Green) } else { Style::default().fg(Color::White) },
+                format!(
+                    "{} {} {}",
+                    team_short(&tm.home),
+                    tm.score,
+                    team_short(&tm.away)
+                ),
+                if tm.completed {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                },
             ),
         ]));
     }

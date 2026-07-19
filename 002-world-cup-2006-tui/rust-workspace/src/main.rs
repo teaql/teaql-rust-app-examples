@@ -278,18 +278,38 @@ fn print_headless_bracket(app: &App) {
 
     // Connectors
     #[derive(Clone, Copy)]
-    enum Conn { E, T, M, B, V }
+    enum Conn {
+        E,
+        T,
+        M,
+        B,
+        V,
+    }
     let mut cx: Vec<Vec<Conn>> = vec![vec![Conn::E; ncols.saturating_sub(1)]; nrows];
 
     for c in 0..ncols.saturating_sub(1) {
         for (j, &lm) in pos[c + 1].iter().enumerate() {
             let lt = pos[c][2 * j];
             let lb = pos[c][2 * j + 1];
-            if lt < nrows { cx[lt][c] = Conn::T; }
-            if lm < nrows { cx[lm][c] = Conn::M; }
-            if lb < nrows { cx[lb][c] = Conn::B; }
-            for l in (lt + 1)..lm { if l < nrows { cx[l][c] = Conn::V; } }
-            for l in (lm + 1)..lb { if l < nrows { cx[l][c] = Conn::V; } }
+            if lt < nrows {
+                cx[lt][c] = Conn::T;
+            }
+            if lm < nrows {
+                cx[lm][c] = Conn::M;
+            }
+            if lb < nrows {
+                cx[lb][c] = Conn::B;
+            }
+            for l in (lt + 1)..lm {
+                if l < nrows {
+                    cx[l][c] = Conn::V;
+                }
+            }
+            for l in (lm + 1)..lb {
+                if l < nrows {
+                    cx[l][c] = Conn::V;
+                }
+            }
         }
     }
 
@@ -297,21 +317,36 @@ fn print_headless_bracket(app: &App) {
 
     // Header
     let stage_label = |k: usize| -> &str {
-        match k { 1 => "R32", 2 => "R16", 3 => "QF", 4 => "SF", 6 => "Final", _ => "?" }
+        match k {
+            1 => "R32",
+            2 => "R16",
+            3 => "QF",
+            4 => "SF",
+            6 => "Final",
+            _ => "?",
+        }
     };
     let mut hdr = String::new();
     for (i, &k) in keys.iter().enumerate() {
         hdr.push_str(&format!("{:^w$}", stage_label(k), w = col_w));
-        if i < ncols - 1 { hdr.push_str("   "); }
+        if i < ncols - 1 {
+            hdr.push_str("   ");
+        }
     }
     println!("{}", hdr);
-    println!("{}", "─".repeat(col_w * ncols + 3 * ncols.saturating_sub(1)));
+    println!(
+        "{}",
+        "─".repeat(col_w * ncols + 3 * ncols.saturating_sub(1))
+    );
 
     // Data rows
     for r in 0..nrows {
         let mut line = String::new();
         for c in 0..ncols {
-            let m_opt = pos[c].iter().position(|&p| p == r).map(|i| stages[&keys[c]][i]);
+            let m_opt = pos[c]
+                .iter()
+                .position(|&p| p == r)
+                .map(|i| stages[&keys[c]][i]);
             if let Some(m) = m_opt {
                 let h = crate::ui::team_short(&m.home);
                 let a = crate::ui::team_short(&m.away);
@@ -334,7 +369,9 @@ fn print_headless_bracket(app: &App) {
     }
 
     // Champion
-    let champion = matches.iter().find(|m| m.stage_rank == 6)
+    let champion = matches
+        .iter()
+        .find(|m| m.stage_rank == 6)
         .and_then(|m| m.winner.clone())
         .unwrap_or_else(|| "TBD".to_string());
     println!();
@@ -346,7 +383,11 @@ fn print_headless_bracket(app: &App) {
     if is_projected {
         println!("📊 Status: Projected Bracket (from standings)");
     } else {
-        println!("📊 Status: Knockout Results {}/{} completed", completed, matches.len());
+        println!(
+            "📊 Status: Knockout Results {}/{} completed",
+            completed,
+            matches.len()
+        );
     }
 }
 

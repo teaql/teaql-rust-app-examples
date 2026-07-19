@@ -270,9 +270,11 @@ impl App {
             .collect();
 
         deduped.sort_by(|a, b| {
+            let num_a = a.label.trim_start_matches('M').parse::<u32>().unwrap_or(0);
+            let num_b = b.label.trim_start_matches('M').parse::<u32>().unwrap_or(0);
             a.stage_rank
                 .cmp(&b.stage_rank)
-                .then_with(|| a.label.cmp(&b.label))
+                .then_with(|| num_a.cmp(&num_b))
         });
 
         // Reorder within each stage to match bracket structure:
@@ -300,13 +302,15 @@ impl App {
                 // First try: winner matches
                 let idx = r16_orig.iter().enumerate().position(|(i, m)| {
                     !r16_used[i]
-                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                        && m.winner
+                            .as_ref()
+                            .map(|w| team_short(w) == ts)
+                            .unwrap_or(false)
                 });
                 // Fallback: home/away matches
                 let idx = idx.or_else(|| {
                     r16_orig.iter().enumerate().position(|(i, m)| {
-                        !r16_used[i]
-                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                        !r16_used[i] && (team_short(&m.home) == ts || team_short(&m.away) == ts)
                     })
                 });
                 if let Some(idx) = idx {
@@ -316,7 +320,9 @@ impl App {
             }
         }
         for (i, m) in r16_orig.into_iter().enumerate() {
-            if !r16_used[i] { r16.push(m); }
+            if !r16_used[i] {
+                r16.push(m);
+            }
         }
 
         // Reorder R32 by R16 bracket
@@ -327,12 +333,14 @@ impl App {
                 let ts = team_short(team);
                 let idx = r32_orig.iter().enumerate().position(|(i, m)| {
                     !r32_used[i]
-                        && m.winner.as_ref().map(|w| team_short(w) == ts).unwrap_or(false)
+                        && m.winner
+                            .as_ref()
+                            .map(|w| team_short(w) == ts)
+                            .unwrap_or(false)
                 });
                 let idx = idx.or_else(|| {
                     r32_orig.iter().enumerate().position(|(i, m)| {
-                        !r32_used[i]
-                            && (team_short(&m.home) == ts || team_short(&m.away) == ts)
+                        !r32_used[i] && (team_short(&m.home) == ts || team_short(&m.away) == ts)
                     })
                 });
                 if let Some(idx) = idx {
@@ -342,7 +350,9 @@ impl App {
             }
         }
         for (i, m) in r32_orig.into_iter().enumerate() {
-            if !r32_used[i] { r32.push(m); }
+            if !r32_used[i] {
+                r32.push(m);
+            }
         }
 
         // Reassemble in order: R32, R16, QF, then remaining stages (SF, 3rd, Final)
@@ -371,8 +381,10 @@ impl App {
             .away_team()
             .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
             .unwrap_or_else(|| "TBD".to_string());
-        let completed = m.home_score() != 0 || m.away_score() != 0
-            || m.penalty_home() != 0 || m.penalty_away() != 0;
+        let completed = m.home_score() != 0
+            || m.away_score() != 0
+            || m.penalty_home() != 0
+            || m.penalty_away() != 0;
         let mut score = if completed {
             format!("{} - {}", m.home_score(), m.away_score())
         } else {
@@ -502,9 +514,7 @@ impl App {
                 self.log("Live events synced successfully.");
             }
         } else {
-            self.log(
-                "Unknown command. Try: bracket, players, sync live, logs, quit",
-            );
+            self.log("Unknown command. Try: bracket, players, sync live, logs, quit");
         }
 
         self.input_buffer.clear();
