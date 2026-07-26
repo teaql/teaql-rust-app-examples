@@ -21,3 +21,4 @@
 # Ignore temporary or debug outputs
 debug/
 logs/
+ratatui-tournament/

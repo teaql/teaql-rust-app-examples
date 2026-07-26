@@ -1,5 +1,6 @@
 use fifa_world_cup_2026_service::*;
 use ratatui::widgets::{ListState, TableState};
+use ratatui_tournament::BracketMatch;
 use teaql_core::{Entity, UpdateCommand};
 use teaql_runtime::UserContext;
 
@@ -38,17 +39,6 @@ pub enum View {
     Logs,
 }
 
-#[derive(Debug, Clone)]
-pub struct KnockoutMatchView {
-    pub stage: &'static str,
-    pub stage_rank: usize,
-    pub label: String,
-    pub home: String,
-    pub away: String,
-    pub score: String,
-    pub winner: Option<String>,
-    pub completed: bool,
-}
 
 pub struct App {
     pub view: View,
@@ -58,7 +48,7 @@ pub struct App {
     pub ctx: UserContext,
 
     // Cached data
-    pub knockout_matches: Vec<KnockoutMatchView>,
+    pub knockout_matches: Vec<BracketMatch>,
     pub top_players: Vec<(String, String, i32)>, // (Team, Player, Goals)
     pub recent_matches: Vec<TournamentMatch>,
 
@@ -220,7 +210,7 @@ impl App {
 
     async fn fetch_knockout_matches(
         &self,
-    ) -> Result<Vec<KnockoutMatchView>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<BracketMatch>, Box<dyn std::error::Error>> {
         let mut matches = Q::tournament_matches()
             .select_home_team_with(Q::tournament_teams().select_self())
             .select_away_team_with(Q::tournament_teams().select_self())
@@ -247,8 +237,8 @@ impl App {
             .enumerate()
             .filter_map(|(idx, m)| {
                 let sequence = idx + 1;
-                let (stage, stage_rank) = Self::knockout_stage_for_match(&m, sequence, total)?;
-                Some(Self::knockout_match_view(m, stage, stage_rank, sequence))
+                let (_stage, stage_rank) = Self::knockout_stage_for_match(&m, sequence, total)?;
+                Some(Self::knockout_match_view(m, stage_rank, sequence))
             })
             .collect();
 
@@ -262,7 +252,7 @@ impl App {
             *entry = i;
         }
         let keep: std::collections::HashSet<usize> = seen.values().copied().collect();
-        let mut deduped: Vec<KnockoutMatchView> = result
+        let mut deduped: Vec<BracketMatch> = result
             .into_iter()
             .enumerate()
             .filter(|(i, _)| keep.contains(i))
@@ -283,7 +273,7 @@ impl App {
         // R32 is similarly reordered based on R16 participants.
         use crate::ui::team_short;
 
-        let mut by_stage: std::collections::BTreeMap<usize, Vec<KnockoutMatchView>> =
+        let mut by_stage: std::collections::BTreeMap<usize, Vec<BracketMatch>> =
             std::collections::BTreeMap::new();
         for m in deduped {
             by_stage.entry(m.stage_rank).or_default().push(m);
@@ -294,7 +284,7 @@ impl App {
         let r32_orig = by_stage.remove(&1).unwrap_or_default();
 
         // Reorder R16 by QF bracket
-        let mut r16: Vec<KnockoutMatchView> = Vec::new();
+        let mut r16: Vec<BracketMatch> = Vec::new();
         let mut r16_used = vec![false; r16_orig.len()];
         for q in &qf {
             for team in [&q.home, &q.away] {
@@ -326,7 +316,7 @@ impl App {
         }
 
         // Reorder R32 by R16 bracket
-        let mut r32: Vec<KnockoutMatchView> = Vec::new();
+        let mut r32: Vec<BracketMatch> = Vec::new();
         let mut r32_used = vec![false; r32_orig.len()];
         for r in &r16 {
             for team in [&r.home, &r.away] {
@@ -369,10 +359,9 @@ impl App {
 
     fn knockout_match_view(
         m: TournamentMatch,
-        stage: &'static str,
         stage_rank: usize,
         sequence: usize,
-    ) -> KnockoutMatchView {
+    ) -> BracketMatch {
         let home = m
             .home_team()
             .map(|t| format!("{} {}", t.emoji_flag(), t.team_name()))
@@ -410,15 +399,47 @@ impl App {
             None
         };
 
-        KnockoutMatchView {
-            stage,
+        let label = format!("M{:02}", m.match_number().max(sequence as i32));
+        let pending_text = if !completed && stage_rank > 1 {
+            Some(format!("? {}", Self::match_date_for_label(&label, stage_rank)))
+        } else {
+            None
+        };
+
+        BracketMatch {
             stage_rank,
-            label: format!("M{:02}", m.match_number().max(sequence as i32)),
+            label,
             home,
             away,
             score,
             winner,
             completed,
+            pending_text,
+        }
+    }
+
+    fn match_date_for_label(label: &str, stage_rank: usize) -> String {
+        match stage_rank {
+            2 => match label {
+                "M89" | "M90" | "M91" | "M92" => "7/7".to_string(),
+                "M93" | "M94" | "M95" | "M96" => "7/8".to_string(),
+                _ => "TBD".to_string(),
+            },
+            3 => match label {
+                "M97" => "7/9".to_string(),
+                "M98" => "7/10".to_string(),
+                "M99" | "M100" => "7/11".to_string(),
+                _ => "TBD".to_string(),
+            },
+            4 => match label {
+                "M101" | "M102" => "7/15".to_string(),
+                _ => "TBD".to_string(),
+            },
+            6 => match label {
+                "M104" => "7/19".to_string(),
+                _ => "TBD".to_string(),
+            },
+            _ => "TBD".to_string(),
         }
     }
 

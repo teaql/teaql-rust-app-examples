@@ -250,7 +250,7 @@ fn print_headless_bracket(app: &App) {
     }
 
     // Group by stage_rank, exclude Third Place (5)
-    let mut stages: BTreeMap<usize, Vec<&app::KnockoutMatchView>> = BTreeMap::new();
+    let mut stages: BTreeMap<usize, Vec<&ratatui_tournament::BracketMatch>> = BTreeMap::new();
     for m in matches {
         if m.stage_rank != 5 {
             stages.entry(m.stage_rank).or_default().push(m);
