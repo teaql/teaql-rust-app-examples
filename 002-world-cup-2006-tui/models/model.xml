@@ -1,7 +1,4 @@
 <root
-  alias_model_name="fifa_world_cup_2026"
-  chinese_name="FIFA世界杯2026管理系统"
-  english_name="Fifa World Cup 2026 Management System"
   name="fifa-world-cup-2026-service"
   cfg_mask_china_mobile="false"
   data_service="sqlite"

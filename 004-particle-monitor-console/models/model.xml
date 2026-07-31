@@ -1,0 +1,59 @@
+<root name="pms-service"
+      cfg_mask_china_mobile="false"
+      data_service="sqlite"
+      org="doublechaintech"
+      _module_key="root">
+
+  <device_system _name="Device System"
+                 _module="System Management"
+                 _module_key="system-management"
+                 name="PMS-GT660X Terminal"
+                 serial_number="PMS-2026-0701"
+                 create_time="createTime()"
+                 update_time="updateTime()"/>
+
+  <system_status _name="System Status"
+                 _module="System Management"
+                 _module_key="system-management"
+                 device_system="device_system()"
+                 id="id()" name="string()" code="string()"
+                 _constant="true" _identifier="code">
+    <_value id="1001" name="Online" code="ONLINE"/>
+    <_value id="1002" name="Offline" code="OFFLINE"/>
+    <_value id="1003" name="Sampling" code="SAMPLING"/>
+    <_value id="1004" name="Calibrating" code="CALIBRATING"/>
+  </system_status>
+
+  <device_setting _name="Device Setting"
+                  _module="System Management"
+                  _module_key="system-management"
+                  device_system="device_system()"
+                  calibration_point="0"
+                  data_keep_days="30"
+                  sampling_frequency="10"
+                  password_enabled="1"
+                  password="pass_123456"
+                  super_password="pass_888888"
+                  create_time="createTime()"
+                  update_time="updateTime()"
+                  _audit_mask_fields="password,password_enabled,super_password"/>
+
+  <sample_record _name="Sample Record"
+                 _module="System Management"
+                 _module_key="system-management"
+                 device_system="device_system()"
+                 system_status="system_status()"
+                 sample_time="createTime()"
+                 gas="28.3"
+                 lref="2.45"
+                 impurity1="1250"
+                 impurity2="850"
+                 impurity3="420"
+                 impurity4="180"
+                 impurity5="45"
+                 impurity6="12"
+                 impurity7="3"
+                 impurity8="1"
+                 create_time="createTime()"/>
+
+</root>

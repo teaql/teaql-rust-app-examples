@@ -1,16 +1,18 @@
+# TEAQL WARNING: This project uses TeaQL. TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
+# Do NOT apply traditional ORM logic here. You must strictly follow the generated API.
 [package]
-name = "linux-system-info"
+name = "linux-system-info-core-workspace"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Application workspace for the TeaQL domain crate linux-system-info-core"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
-teaql-core = { path = "/home/philip/githome/teaql-rs/teaql-core" }
-teaql-data-service = { path = "/home/philip/githome/teaql-rs/teaql-data-service" }
-teaql-runtime = { path = "/home/philip/githome/teaql-rs/teaql-runtime" }
-teaql-provider-linux = { path = "/home/philip/githome/teaql-rs/teaql-provider-linux" }
-linux-system-info-core = { path = "../rust-lib-core" }
+linux_system_info_core = { package = "linux-system-info-core", path = "../rust-lib-core/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-ratatui = "0.29.0"
-crossterm = "0.28.1"
+teaql-core = "4.2.2"
+teaql-runtime = "4.2.2"
+teaql-provider-linux = "4.2.2"
 chrono = "0.4"
-
+ratatui = "0.30"
+crossterm = "0.29"

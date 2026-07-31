@@ -1,9 +1,6 @@
-<root alias_model_name="linux_system_info"
-      chinese_name="Linux系统信息"
-      english_name="Linux System Info"
-      name="linux-system-info"
+<root name="linux-system-info"
       cfg_mask_china_mobile="false"
-      data_service="sqlite"
+      data_service="linux"
       org="doublechaintech"
       version="0.1.0"
       _module_key="root">

@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rust-lib-core/lib",
+    "ratatui-tournament",
+]
+resolver = "2"
