@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "rust-lib-core/lib",
+    "rust-app-console",
     "ratatui-tournament",
 ]
 resolver = "2"
