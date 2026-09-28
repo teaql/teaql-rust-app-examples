@@ -1,8 +1,9 @@
+
 // ⛔ AI agents: DO NOT read this file for API discovery. Instead run: cargo teaql --input modeling/MODEL.xml rust-assist-query/device_system
 use std::collections::BTreeMap;
 
-use teaql_core::SmartList;
-use teaql_macros::TeaqlEntity;
+use teaql_macros::{teaql_entity, TeaqlEntity};
+
 
 /// [TEAQL AI WARNING]
 /// TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
@@ -10,76 +11,61 @@ use teaql_macros::TeaqlEntity;
 /// The methods listed below are the ONLY valid ways to interact with this entity.
 /// If you encounter compilation errors (e.g., method not found), DO NOT guess another method name.
 /// Read the method signatures in this file before proceeding.
+#[teaql_entity]
 #[derive(Clone, Debug, PartialEq, TeaqlEntity)]
+#[teaql(reverse_relation(name = "system_status_list", target = "SystemStatus", local_key = "id", foreign_key = "device_system_id", many))]
+#[teaql(reverse_relation(name = "device_setting_list", target = "DeviceSetting", local_key = "id", foreign_key = "device_system_id", many))]
+#[teaql(reverse_relation(name = "sample_record_list", target = "SampleRecord", local_key = "id", foreign_key = "device_system_id", many))]
 #[teaql(entity = "DeviceSystem", table = "device_system_data", data_service = "sqlite")]
 pub struct DeviceSystem {
 #[teaql(id)]
     id: u64,
 
 // @source model.xml:13
+#[teaql(max_length = 100)]
     name: String,
 
 // @source model.xml:13
+#[teaql(max_length = 100)]
     serial_number: String,
 
 // @source model.xml:13
-    create_time: chrono::DateTime<chrono::Utc>,
+    create_time: teaql_core::time::Timestamp,
 
 // @source model.xml:13
-    update_time: chrono::DateTime<chrono::Utc>,
+    update_time: teaql_core::time::Timestamp,
 #[teaql(version)]
     version: i64,
-#[teaql(relation(target = "SystemStatus", local_key = "id", foreign_key = "device_system_id", many))]
-    system_status_list: SmartList<crate::SystemStatus>,
-#[teaql(relation(target = "DeviceSetting", local_key = "id", foreign_key = "device_system_id", many))]
-    device_setting_list: SmartList<crate::DeviceSetting>,
-#[teaql(relation(target = "SampleRecord", local_key = "id", foreign_key = "device_system_id", many))]
-    sample_record_list: SmartList<crate::SampleRecord>,
     #[teaql(dynamic)]
     dynamic: BTreeMap<String, teaql_core::Value>,
-    #[teaql(skip)]
-    root: teaql_runtime::EntityRoot,
     #[teaql(skip)]
     pub __load_state: teaql_core::eval::LoadState,
 }
 
 impl DeviceSystem {
+    pub const ENTITY_NAME: &'static str = "Device System";
+
     pub fn with_id(id: u64) -> teaql_core::Value {
         teaql_core::Value::U64(id)
     }
 
-    pub(crate) fn runtime_new(root: teaql_runtime::EntityRoot) -> Self {
+    pub(crate) fn runtime_new(root: teaql_runtime::EntityRuntimeState) -> Self {
         Self {
             id: 0_u64,
             name: String::new(),
             serial_number: String::new(),
-            create_time: chrono::Utc::now(),
-            update_time: chrono::Utc::now(),
+            create_time: teaql_core::time::Timestamp::now(),
+            update_time: teaql_core::time::Timestamp::now(),
             version: 0_i64,
-            system_status_list: Default::default(),
-            device_setting_list: Default::default(),
-            sample_record_list: Default::default(),
             dynamic: BTreeMap::new(),
-            root,
+            __teaql_runtime_state: root,
             __load_state: teaql_core::eval::LoadState::FullyLoaded,
         }
     }
 
-    pub fn entity_key(&self) -> teaql_runtime::EntityKey {
-        teaql_runtime::EntityKey::new("DeviceSystem", self.id)
-    }
-
-    pub fn attach_root_recursive(&mut self, root: teaql_runtime::EntityRoot) {
-        self.root = root.clone();
-        for entity in &mut self.system_status_list {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.device_setting_list {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.sample_record_list {
-            entity.attach_root_recursive(root.clone());
-        }
+    pub fn attach_runtime_state_recursive(&mut self, root: teaql_runtime::EntityRuntimeState) {
+        root.adopt_mutations_from(self.__teaql_runtime_state());
+        self.__teaql_replace_runtime_state(root.clone());
     }
 
     pub fn is_loaded(&self, field_or_relation: &str) -> bool {
@@ -97,12 +83,12 @@ impl DeviceSystem {
     pub fn update_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.id = value.try_u64().unwrap_or(self.id.clone());
-        self.root.set(self.entity_key(), "id", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "id", value);
         self
     }
 
     pub fn changed_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "id")
     }
 
     pub fn eval_id(&self) -> teaql_core::eval::EvalResult<u64> {
@@ -112,6 +98,7 @@ impl DeviceSystem {
                     teaql_core::eval::EvalResult::Value(self.id())
                 }}
 
+
     pub fn name(&self) -> String {
         self.changed_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.name.clone())
     }
@@ -119,12 +106,12 @@ impl DeviceSystem {
     pub fn update_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.name.clone());
-        self.root.set(self.entity_key(), "name", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "name", value);
         self
     }
 
     pub fn changed_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "name")
+        self.__teaql_runtime_state().get(&self.entity_key(), "name")
     }
 
     pub fn eval_name(&self) -> teaql_core::eval::EvalResult<String> {
@@ -134,6 +121,7 @@ impl DeviceSystem {
                     teaql_core::eval::EvalResult::Value(self.name())
                 }}
 
+
     pub fn serial_number(&self) -> String {
         self.changed_serial_number().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.serial_number.clone())
     }
@@ -141,12 +129,12 @@ impl DeviceSystem {
     pub fn update_serial_number(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.serial_number = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.serial_number.clone());
-        self.root.set(self.entity_key(), "serial_number", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "serial_number", value);
         self
     }
 
     pub fn changed_serial_number(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "serial_number")
+        self.__teaql_runtime_state().get(&self.entity_key(), "serial_number")
     }
 
     pub fn eval_serial_number(&self) -> teaql_core::eval::EvalResult<String> {
@@ -156,49 +144,50 @@ impl DeviceSystem {
                     teaql_core::eval::EvalResult::Value(self.serial_number())
                 }}
 
-    pub fn create_time(&self) -> chrono::DateTime<chrono::Utc> {
+
+    pub fn create_time(&self) -> teaql_core::time::Timestamp {
         self.changed_create_time().and_then(|value| value.try_timestamp()).unwrap_or(self.create_time)
     }
 
-    pub fn update_create_time(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
-        let value = value.into();
-        self.create_time = value.try_timestamp().unwrap_or(self.create_time.clone());
-        self.root.set(self.entity_key(), "create_time", value);
+    pub fn update_create_time(&mut self, value: teaql_core::time::Timestamp) -> &mut Self {
+        self.create_time = value;
+        let value = teaql_core::Value::from(value);
+        self.__teaql_runtime_state().set(self.entity_key(), "create_time", value);
         self
     }
-
     pub fn changed_create_time(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "create_time")
+        self.__teaql_runtime_state().get(&self.entity_key(), "create_time")
     }
 
-    pub fn eval_create_time(&self) -> teaql_core::eval::EvalResult<chrono::DateTime<chrono::Utc>> {
+    pub fn eval_create_time(&self) -> teaql_core::eval::EvalResult<teaql_core::time::Timestamp> {
         if !self.is_loaded("create_time") {
                     teaql_core::eval::EvalResult::NotLoaded { failed_node: "create_time".to_string(), attempted_path: "create_time".to_string() }
                 } else {
                     teaql_core::eval::EvalResult::Value(self.create_time())
                 }}
 
-    pub fn update_time(&self) -> chrono::DateTime<chrono::Utc> {
+
+    pub fn update_time(&self) -> teaql_core::time::Timestamp {
         self.changed_update_time().and_then(|value| value.try_timestamp()).unwrap_or(self.update_time)
     }
 
-    pub fn update_update_time(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
-        let value = value.into();
-        self.update_time = value.try_timestamp().unwrap_or(self.update_time.clone());
-        self.root.set(self.entity_key(), "update_time", value);
+    pub fn update_update_time(&mut self, value: teaql_core::time::Timestamp) -> &mut Self {
+        self.update_time = value;
+        let value = teaql_core::Value::from(value);
+        self.__teaql_runtime_state().set(self.entity_key(), "update_time", value);
         self
     }
-
     pub fn changed_update_time(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "update_time")
+        self.__teaql_runtime_state().get(&self.entity_key(), "update_time")
     }
 
-    pub fn eval_update_time(&self) -> teaql_core::eval::EvalResult<chrono::DateTime<chrono::Utc>> {
+    pub fn eval_update_time(&self) -> teaql_core::eval::EvalResult<teaql_core::time::Timestamp> {
         if !self.is_loaded("update_time") {
                     teaql_core::eval::EvalResult::NotLoaded { failed_node: "update_time".to_string(), attempted_path: "update_time".to_string() }
                 } else {
                     teaql_core::eval::EvalResult::Value(self.update_time())
                 }}
+
 
     pub fn version(&self) -> i64 {
         self.changed_version().and_then(|value| value.try_i64()).unwrap_or(self.version)
@@ -207,12 +196,12 @@ impl DeviceSystem {
     pub fn update_version(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.version = value.try_i64().unwrap_or(self.version.clone());
-        self.root.set(self.entity_key(), "version", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "version", value);
         self
     }
 
     pub fn changed_version(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "version")
+        self.__teaql_runtime_state().get(&self.entity_key(), "version")
     }
 
     pub fn eval_version(&self) -> teaql_core::eval::EvalResult<i64> {
@@ -221,62 +210,60 @@ impl DeviceSystem {
                 } else {
                     teaql_core::eval::EvalResult::Value(self.version())
                 }}
-    pub fn system_status_list(&self) -> &SmartList<crate::SystemStatus> {
-        &self.system_status_list
+
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn system_status_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::SystemStatus>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "system_status_list",
+        )
     }
 
-    pub fn system_status_list_mut(&mut self) -> &mut SmartList<crate::SystemStatus> {
-        &mut self.system_status_list
-    }
-
-    pub fn eval_system_status_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::SystemStatus>> {
-        if !self.is_loaded("system_status_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "system_status_list".to_string(), attempted_path: "system_status_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self.system_status_list)
+    pub fn eval_system_status_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::SystemStatus>> {
+        let relation = self.system_status_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "system_status_list".to_string(), attempted_path: "system_status_list".to_string() },
         }
     }
 
-    pub fn device_setting_list(&self) -> &SmartList<crate::DeviceSetting> {
-        &self.device_setting_list
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn device_setting_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::DeviceSetting>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "device_setting_list",
+        )
     }
 
-    pub fn device_setting_list_mut(&mut self) -> &mut SmartList<crate::DeviceSetting> {
-        &mut self.device_setting_list
-    }
-
-    pub fn eval_device_setting_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::DeviceSetting>> {
-        if !self.is_loaded("device_setting_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "device_setting_list".to_string(), attempted_path: "device_setting_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self.device_setting_list)
+    pub fn eval_device_setting_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::DeviceSetting>> {
+        let relation = self.device_setting_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "device_setting_list".to_string(), attempted_path: "device_setting_list".to_string() },
         }
     }
 
-    pub fn sample_record_list(&self) -> &SmartList<crate::SampleRecord> {
-        &self.sample_record_list
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn sample_record_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::SampleRecord>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "sample_record_list",
+        )
     }
 
-    pub fn sample_record_list_mut(&mut self) -> &mut SmartList<crate::SampleRecord> {
-        &mut self.sample_record_list
-    }
-
-    pub fn eval_sample_record_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::SampleRecord>> {
-        if !self.is_loaded("sample_record_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "sample_record_list".to_string(), attempted_path: "sample_record_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self.sample_record_list)
+    pub fn eval_sample_record_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::SampleRecord>> {
+        let relation = self.sample_record_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "sample_record_list".to_string(), attempted_path: "sample_record_list".to_string() },
         }
     }
 
-    pub fn mark_as_delete(&mut self) -> &mut Self {
-        self.root.mark_as_delete(self.entity_key());
-        self
-    }
-
-    pub fn set_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.root.set_comment(comment);
-        self
-    }
 }
 

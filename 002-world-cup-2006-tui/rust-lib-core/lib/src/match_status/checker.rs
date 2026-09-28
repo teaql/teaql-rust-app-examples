@@ -1,9 +1,10 @@
+
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait MatchStatusCheckerLogic: Send + Sync {
     fn check_and_fix_match_status(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::MatchStatus,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -115,13 +116,63 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::MatchStatus,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("name") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("name"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("code") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("code"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("tournament_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("tournament"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
         self.logic
-            .check_and_fix_match_status(ctx, entity, status, location, results);
+            .check_and_fix_match_status(context, entity, status, location, results);
     }
 }

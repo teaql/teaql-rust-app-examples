@@ -1,8 +1,9 @@
+
 // ⛔ AI agents: DO NOT read this file for API discovery. Instead run: cargo teaql --input modeling/MODEL.xml rust-assist-query/tournament_team
 use std::collections::BTreeMap;
 
-use teaql_core::SmartList;
-use teaql_macros::TeaqlEntity;
+use teaql_macros::{teaql_entity, TeaqlEntity};
+
 
 /// [TEAQL AI WARNING]
 /// TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
@@ -10,35 +11,46 @@ use teaql_macros::TeaqlEntity;
 /// The methods listed below are the ONLY valid ways to interact with this entity.
 /// If you encounter compilation errors (e.g., method not found), DO NOT guess another method name.
 /// Read the method signatures in this file before proceeding.
+#[teaql_entity]
 #[derive(Clone, Debug, PartialEq, TeaqlEntity)]
+#[teaql(reverse_relation(name = "tournament_match_list_as_home_team", target = "TournamentMatch", local_key = "id", foreign_key = "home_team_id", many))]
+#[teaql(reverse_relation(name = "tournament_match_list_as_away_team", target = "TournamentMatch", local_key = "id", foreign_key = "away_team_id", many))]
+#[teaql(reverse_relation(name = "match_goal_list", target = "MatchGoal", local_key = "id", foreign_key = "tournament_team_id", many))]
+#[teaql(reverse_relation(name = "match_card_list", target = "MatchCard", local_key = "id", foreign_key = "tournament_team_id", many))]
+#[teaql(reverse_relation(name = "group_standing_list", target = "GroupStanding", local_key = "id", foreign_key = "tournament_team_id", many))]
 #[teaql(entity = "TournamentTeam", table = "tournament_team_data", data_service = "sqlite")]
 pub struct TournamentTeam {
 #[teaql(id)]
     id: u64,
 
 // @source model.xml:144
+#[teaql(max_length = 100)]
     team_name: String,
 
 // @source model.xml:144
+#[teaql(max_length = 100)]
     team_code: String,
 
 // @source model.xml:144
+#[teaql(max_length = 100)]
     emoji_flag: String,
 
 // @source model.xml:144
     fifa_ranking: i64,
 
 // @source model.xml:144
+#[teaql(max_length = 100)]
     manager_name: String,
 
 // @source model.xml:144
+#[teaql(max_length = 100)]
     group_letter: String,
 
 // @source model.xml:144
-    create_time: chrono::DateTime<chrono::Utc>,
+    create_time: teaql_core::time::Timestamp,
 
 // @source model.xml:144
-    update_time: chrono::DateTime<chrono::Utc>,
+    update_time: teaql_core::time::Timestamp,
 #[teaql(version)]
     version: i64,
 // @source model.xml:144
@@ -50,27 +62,25 @@ pub struct TournamentTeam {
     tournament_id: u64,
 // @source model.xml:144
 #[teaql(relation(target = "Confederation", local_key = "confederation_id", foreign_key = "id"))]
-    confederation: Option<crate::Confederation>,
+    confederation: Option<Box<crate::Confederation>>,
 
 // @source model.xml:144
 #[teaql(relation(target = "Tournament", local_key = "tournament_id", foreign_key = "id"))]
-    tournament: Option<crate::Tournament>,
-    #[teaql(boxed_relations)]
-    pub _relations: Box<TournamentTeamReverseRelations>,
+    tournament: Option<Box<crate::Tournament>>,
     #[teaql(dynamic)]
     dynamic: BTreeMap<String, teaql_core::Value>,
-    #[teaql(skip)]
-    root: teaql_runtime::EntityRoot,
     #[teaql(skip)]
     pub __load_state: teaql_core::eval::LoadState,
 }
 
 impl TournamentTeam {
+    pub const ENTITY_NAME: &'static str = "Tournament Team";
+
     pub fn with_id(id: u64) -> teaql_core::Value {
         teaql_core::Value::U64(id)
     }
 
-    pub(crate) fn runtime_new(root: teaql_runtime::EntityRoot) -> Self {
+    pub(crate) fn runtime_new(root: teaql_runtime::EntityRuntimeState) -> Self {
         Self {
             id: 0_u64,
             team_name: String::new(),
@@ -79,33 +89,28 @@ impl TournamentTeam {
             fifa_ranking: 0_i64,
             manager_name: String::new(),
             group_letter: String::new(),
-            create_time: chrono::Utc::now(),
-            update_time: chrono::Utc::now(),
+            create_time: teaql_core::time::Timestamp::now(),
+            update_time: teaql_core::time::Timestamp::now(),
             version: 0_i64,
             confederation_id: 0_u64,
             tournament_id: 0_u64,
             confederation: None,
             tournament: None,
-            _relations: Box::new(TournamentTeamReverseRelations::new()),
             dynamic: BTreeMap::new(),
-            root,
+            __teaql_runtime_state: root,
             __load_state: teaql_core::eval::LoadState::FullyLoaded,
         }
     }
 
-    pub fn entity_key(&self) -> teaql_runtime::EntityKey {
-        teaql_runtime::EntityKey::new("TournamentTeam", self.id)
-    }
-
-    pub fn attach_root_recursive(&mut self, root: teaql_runtime::EntityRoot) {
-        self.root = root.clone();
+    pub fn attach_runtime_state_recursive(&mut self, root: teaql_runtime::EntityRuntimeState) {
+        root.adopt_mutations_from(self.__teaql_runtime_state());
+        self.__teaql_replace_runtime_state(root.clone());
         if let Some(entity) = &mut self.confederation {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
         if let Some(entity) = &mut self.tournament {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
-        self._relations.attach_root_recursive(root.clone());
     }
 
     pub fn is_loaded(&self, field_or_relation: &str) -> bool {
@@ -123,12 +128,12 @@ impl TournamentTeam {
     pub fn update_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.id = value.try_u64().unwrap_or(self.id.clone());
-        self.root.set(self.entity_key(), "id", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "id", value);
         self
     }
 
     pub fn changed_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "id")
     }
 
     pub fn eval_id(&self) -> teaql_core::eval::EvalResult<u64> {
@@ -138,6 +143,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.id())
                 }}
 
+
     pub fn team_name(&self) -> String {
         self.changed_team_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.team_name.clone())
     }
@@ -145,12 +151,12 @@ impl TournamentTeam {
     pub fn update_team_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.team_name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.team_name.clone());
-        self.root.set(self.entity_key(), "team_name", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "team_name", value);
         self
     }
 
     pub fn changed_team_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "team_name")
+        self.__teaql_runtime_state().get(&self.entity_key(), "team_name")
     }
 
     pub fn eval_team_name(&self) -> teaql_core::eval::EvalResult<String> {
@@ -160,6 +166,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.team_name())
                 }}
 
+
     pub fn team_code(&self) -> String {
         self.changed_team_code().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.team_code.clone())
     }
@@ -167,12 +174,12 @@ impl TournamentTeam {
     pub fn update_team_code(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.team_code = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.team_code.clone());
-        self.root.set(self.entity_key(), "team_code", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "team_code", value);
         self
     }
 
     pub fn changed_team_code(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "team_code")
+        self.__teaql_runtime_state().get(&self.entity_key(), "team_code")
     }
 
     pub fn eval_team_code(&self) -> teaql_core::eval::EvalResult<String> {
@@ -182,6 +189,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.team_code())
                 }}
 
+
     pub fn emoji_flag(&self) -> String {
         self.changed_emoji_flag().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.emoji_flag.clone())
     }
@@ -189,12 +197,12 @@ impl TournamentTeam {
     pub fn update_emoji_flag(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.emoji_flag = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.emoji_flag.clone());
-        self.root.set(self.entity_key(), "emoji_flag", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "emoji_flag", value);
         self
     }
 
     pub fn changed_emoji_flag(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "emoji_flag")
+        self.__teaql_runtime_state().get(&self.entity_key(), "emoji_flag")
     }
 
     pub fn eval_emoji_flag(&self) -> teaql_core::eval::EvalResult<String> {
@@ -204,6 +212,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.emoji_flag())
                 }}
 
+
     pub fn fifa_ranking(&self) -> i64 {
         self.changed_fifa_ranking().and_then(|value| value.try_i64()).map(|value| value as i64).unwrap_or(self.fifa_ranking)
     }
@@ -211,12 +220,12 @@ impl TournamentTeam {
     pub fn update_fifa_ranking(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.fifa_ranking = value.try_i64().map(|value| value as i64).unwrap_or(self.fifa_ranking.clone());
-        self.root.set(self.entity_key(), "fifa_ranking", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "fifa_ranking", value);
         self
     }
 
     pub fn changed_fifa_ranking(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "fifa_ranking")
+        self.__teaql_runtime_state().get(&self.entity_key(), "fifa_ranking")
     }
 
     pub fn eval_fifa_ranking(&self) -> teaql_core::eval::EvalResult<i64> {
@@ -226,6 +235,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.fifa_ranking())
                 }}
 
+
     pub fn manager_name(&self) -> String {
         self.changed_manager_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.manager_name.clone())
     }
@@ -233,12 +243,12 @@ impl TournamentTeam {
     pub fn update_manager_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.manager_name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.manager_name.clone());
-        self.root.set(self.entity_key(), "manager_name", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "manager_name", value);
         self
     }
 
     pub fn changed_manager_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "manager_name")
+        self.__teaql_runtime_state().get(&self.entity_key(), "manager_name")
     }
 
     pub fn eval_manager_name(&self) -> teaql_core::eval::EvalResult<String> {
@@ -248,6 +258,7 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.manager_name())
                 }}
 
+
     pub fn group_letter(&self) -> String {
         self.changed_group_letter().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.group_letter.clone())
     }
@@ -255,12 +266,12 @@ impl TournamentTeam {
     pub fn update_group_letter(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.group_letter = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.group_letter.clone());
-        self.root.set(self.entity_key(), "group_letter", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "group_letter", value);
         self
     }
 
     pub fn changed_group_letter(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "group_letter")
+        self.__teaql_runtime_state().get(&self.entity_key(), "group_letter")
     }
 
     pub fn eval_group_letter(&self) -> teaql_core::eval::EvalResult<String> {
@@ -270,49 +281,50 @@ impl TournamentTeam {
                     teaql_core::eval::EvalResult::Value(self.group_letter())
                 }}
 
-    pub fn create_time(&self) -> chrono::DateTime<chrono::Utc> {
+
+    pub fn create_time(&self) -> teaql_core::time::Timestamp {
         self.changed_create_time().and_then(|value| value.try_timestamp()).unwrap_or(self.create_time)
     }
 
-    pub fn update_create_time(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
-        let value = value.into();
-        self.create_time = value.try_timestamp().unwrap_or(self.create_time.clone());
-        self.root.set(self.entity_key(), "create_time", value);
+    pub fn update_create_time(&mut self, value: teaql_core::time::Timestamp) -> &mut Self {
+        self.create_time = value;
+        let value = teaql_core::Value::from(value);
+        self.__teaql_runtime_state().set(self.entity_key(), "create_time", value);
         self
     }
-
     pub fn changed_create_time(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "create_time")
+        self.__teaql_runtime_state().get(&self.entity_key(), "create_time")
     }
 
-    pub fn eval_create_time(&self) -> teaql_core::eval::EvalResult<chrono::DateTime<chrono::Utc>> {
+    pub fn eval_create_time(&self) -> teaql_core::eval::EvalResult<teaql_core::time::Timestamp> {
         if !self.is_loaded("create_time") {
                     teaql_core::eval::EvalResult::NotLoaded { failed_node: "create_time".to_string(), attempted_path: "create_time".to_string() }
                 } else {
                     teaql_core::eval::EvalResult::Value(self.create_time())
                 }}
 
-    pub fn update_time(&self) -> chrono::DateTime<chrono::Utc> {
+
+    pub fn update_time(&self) -> teaql_core::time::Timestamp {
         self.changed_update_time().and_then(|value| value.try_timestamp()).unwrap_or(self.update_time)
     }
 
-    pub fn update_update_time(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
-        let value = value.into();
-        self.update_time = value.try_timestamp().unwrap_or(self.update_time.clone());
-        self.root.set(self.entity_key(), "update_time", value);
+    pub fn update_update_time(&mut self, value: teaql_core::time::Timestamp) -> &mut Self {
+        self.update_time = value;
+        let value = teaql_core::Value::from(value);
+        self.__teaql_runtime_state().set(self.entity_key(), "update_time", value);
         self
     }
-
     pub fn changed_update_time(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "update_time")
+        self.__teaql_runtime_state().get(&self.entity_key(), "update_time")
     }
 
-    pub fn eval_update_time(&self) -> teaql_core::eval::EvalResult<chrono::DateTime<chrono::Utc>> {
+    pub fn eval_update_time(&self) -> teaql_core::eval::EvalResult<teaql_core::time::Timestamp> {
         if !self.is_loaded("update_time") {
                     teaql_core::eval::EvalResult::NotLoaded { failed_node: "update_time".to_string(), attempted_path: "update_time".to_string() }
                 } else {
                     teaql_core::eval::EvalResult::Value(self.update_time())
                 }}
+
 
     pub fn version(&self) -> i64 {
         self.changed_version().and_then(|value| value.try_i64()).unwrap_or(self.version)
@@ -321,12 +333,12 @@ impl TournamentTeam {
     pub fn update_version(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.version = value.try_i64().unwrap_or(self.version.clone());
-        self.root.set(self.entity_key(), "version", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "version", value);
         self
     }
 
     pub fn changed_version(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "version")
+        self.__teaql_runtime_state().get(&self.entity_key(), "version")
     }
 
     pub fn eval_version(&self) -> teaql_core::eval::EvalResult<i64> {
@@ -335,6 +347,7 @@ impl TournamentTeam {
                 } else {
                     teaql_core::eval::EvalResult::Value(self.version())
                 }}
+
     pub fn confederation_id(&self) -> u64 {
         self.changed_confederation_id().and_then(|value| value.try_u64()).unwrap_or(self.confederation_id)
     }
@@ -342,12 +355,12 @@ impl TournamentTeam {
     pub(crate) fn update_confederation_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.confederation_id = value.try_u64().unwrap_or(self.confederation_id.clone());
-        self.root.set(self.entity_key(), "confederation_id", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "confederation_id", value);
         self
     }
 
     pub fn changed_confederation_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "confederation_id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "confederation_id")
     }
 
     pub fn eval_confederation_id(&self) -> teaql_core::eval::EvalResult<u64> {
@@ -364,12 +377,12 @@ impl TournamentTeam {
     pub fn update_tournament_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.tournament_id = value.try_u64().unwrap_or(self.tournament_id.clone());
-        self.root.set(self.entity_key(), "tournament_id", value);
+        self.__teaql_runtime_state().set(self.entity_key(), "tournament_id", value);
         self
     }
 
     pub fn changed_tournament_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "tournament_id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "tournament_id")
     }
 
     pub fn eval_tournament_id(&self) -> teaql_core::eval::EvalResult<u64> {
@@ -421,165 +434,118 @@ impl TournamentTeam {
         self.confederation_id() == 1006_u64
     }
     pub fn confederation(&self) -> Option<&crate::Confederation> {
-        self.confederation.as_ref()
+        self.confederation.as_deref().or_else(|| {
+            self.__teaql_runtime_state().resolve_entity(self.confederation_id())})
     }
 
     pub fn eval_confederation(&self) -> teaql_core::eval::EvalResult<&crate::Confederation> {
-        if !self.is_loaded("confederation") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "confederation".to_string(), attempted_path: "confederation".to_string() }
-        } else {
-            match &self.confederation {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.confederation() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("confederation") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded { failed_node: "confederation".to_string(), attempted_path: "confederation".to_string() },
         }
     }
 
     pub fn tournament(&self) -> Option<&crate::Tournament> {
-        self.tournament.as_ref()
+        self.tournament.as_deref().or_else(|| {
+            self.__teaql_runtime_state().resolve_entity(self.tournament_id())})
     }
 
     pub fn eval_tournament(&self) -> teaql_core::eval::EvalResult<&crate::Tournament> {
-        if !self.is_loaded("tournament") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament".to_string(), attempted_path: "tournament".to_string() }
-        } else {
-            match &self.tournament {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.tournament() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("tournament") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament".to_string(), attempted_path: "tournament".to_string() },
         }
     }
-    pub fn tournament_match_list_as_home_team(&self) -> &SmartList<crate::TournamentMatch> {
-        &self._relations.tournament_match_list_as_home_team
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn tournament_match_list_as_home_team(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::TournamentMatch>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "tournament_match_list_as_home_team",
+        )
     }
 
-    pub fn tournament_match_list_as_home_team_mut(&mut self) -> &mut SmartList<crate::TournamentMatch> {
-        &mut self._relations.tournament_match_list_as_home_team
-    }
-
-    pub fn eval_tournament_match_list_as_home_team(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::TournamentMatch>> {
-        if !self.is_loaded("tournament_match_list_as_home_team") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament_match_list_as_home_team".to_string(), attempted_path: "tournament_match_list_as_home_team".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self._relations.tournament_match_list_as_home_team)
-        }
-    }
-
-    pub fn tournament_match_list_as_away_team(&self) -> &SmartList<crate::TournamentMatch> {
-        &self._relations.tournament_match_list_as_away_team
-    }
-
-    pub fn tournament_match_list_as_away_team_mut(&mut self) -> &mut SmartList<crate::TournamentMatch> {
-        &mut self._relations.tournament_match_list_as_away_team
-    }
-
-    pub fn eval_tournament_match_list_as_away_team(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::TournamentMatch>> {
-        if !self.is_loaded("tournament_match_list_as_away_team") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament_match_list_as_away_team".to_string(), attempted_path: "tournament_match_list_as_away_team".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self._relations.tournament_match_list_as_away_team)
+    pub fn eval_tournament_match_list_as_home_team(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::TournamentMatch>> {
+        let relation = self.tournament_match_list_as_home_team();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament_match_list_as_home_team".to_string(), attempted_path: "tournament_match_list_as_home_team".to_string() },
         }
     }
 
-    pub fn match_goal_list(&self) -> &SmartList<crate::MatchGoal> {
-        &self._relations.match_goal_list
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn tournament_match_list_as_away_team(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::TournamentMatch>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "tournament_match_list_as_away_team",
+        )
     }
 
-    pub fn match_goal_list_mut(&mut self) -> &mut SmartList<crate::MatchGoal> {
-        &mut self._relations.match_goal_list
-    }
-
-    pub fn eval_match_goal_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::MatchGoal>> {
-        if !self.is_loaded("match_goal_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "match_goal_list".to_string(), attempted_path: "match_goal_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self._relations.match_goal_list)
+    pub fn eval_tournament_match_list_as_away_team(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::TournamentMatch>> {
+        let relation = self.tournament_match_list_as_away_team();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "tournament_match_list_as_away_team".to_string(), attempted_path: "tournament_match_list_as_away_team".to_string() },
         }
     }
 
-    pub fn match_card_list(&self) -> &SmartList<crate::MatchCard> {
-        &self._relations.match_card_list
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn match_goal_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::MatchGoal>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "match_goal_list",
+        )
     }
 
-    pub fn match_card_list_mut(&mut self) -> &mut SmartList<crate::MatchCard> {
-        &mut self._relations.match_card_list
-    }
-
-    pub fn eval_match_card_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::MatchCard>> {
-        if !self.is_loaded("match_card_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "match_card_list".to_string(), attempted_path: "match_card_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self._relations.match_card_list)
+    pub fn eval_match_goal_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::MatchGoal>> {
+        let relation = self.match_goal_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "match_goal_list".to_string(), attempted_path: "match_goal_list".to_string() },
         }
     }
 
-    pub fn group_standing_list(&self) -> &SmartList<crate::GroupStanding> {
-        &self._relations.group_standing_list
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn match_card_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::MatchCard>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "match_card_list",
+        )
     }
 
-    pub fn group_standing_list_mut(&mut self) -> &mut SmartList<crate::GroupStanding> {
-        &mut self._relations.group_standing_list
-    }
-
-    pub fn eval_group_standing_list(&self) -> teaql_core::eval::EvalResult<&SmartList<crate::GroupStanding>> {
-        if !self.is_loaded("group_standing_list") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "group_standing_list".to_string(), attempted_path: "group_standing_list".to_string() }
-        } else {
-            teaql_core::eval::EvalResult::Value(&self._relations.group_standing_list)
+    pub fn eval_match_card_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::MatchCard>> {
+        let relation = self.match_card_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "match_card_list".to_string(), attempted_path: "match_card_list".to_string() },
         }
     }
 
-    pub fn mark_as_delete(&mut self) -> &mut Self {
-        self.root.mark_as_delete(self.entity_key());
-        self
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn group_standing_list(&self) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::GroupStanding>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "group_standing_list",
+        )
     }
 
-    pub fn set_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.root.set_comment(comment);
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, teaql_macros::TeaqlReverseRelations)]
-pub struct TournamentTeamReverseRelations {
-#[teaql(relation(target = "TournamentMatch", local_key = "id", foreign_key = "home_team_id", many))]
-    tournament_match_list_as_home_team: SmartList<crate::TournamentMatch>,
-#[teaql(relation(target = "TournamentMatch", local_key = "id", foreign_key = "away_team_id", many))]
-    tournament_match_list_as_away_team: SmartList<crate::TournamentMatch>,
-#[teaql(relation(target = "MatchGoal", local_key = "id", foreign_key = "tournament_team_id", many))]
-    match_goal_list: SmartList<crate::MatchGoal>,
-#[teaql(relation(target = "MatchCard", local_key = "id", foreign_key = "tournament_team_id", many))]
-    match_card_list: SmartList<crate::MatchCard>,
-#[teaql(relation(target = "GroupStanding", local_key = "id", foreign_key = "tournament_team_id", many))]
-    group_standing_list: SmartList<crate::GroupStanding>,
-}
-
-impl TournamentTeamReverseRelations {
-    pub fn new() -> Self {
-        Self {
-            tournament_match_list_as_home_team: Default::default(),
-            tournament_match_list_as_away_team: Default::default(),
-            match_goal_list: Default::default(),
-            match_card_list: Default::default(),
-            group_standing_list: Default::default(),
+    pub fn eval_group_standing_list(&self) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::GroupStanding>> {
+        let relation = self.group_standing_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => teaql_core::eval::EvalResult::Value(relation.value().expect("loaded list relation must have a value")),
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded { failed_node: "group_standing_list".to_string(), attempted_path: "group_standing_list".to_string() },
         }
     }
 
-    pub fn attach_root_recursive(&mut self, root: teaql_runtime::EntityRoot) {
-        for entity in &mut self.tournament_match_list_as_home_team {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.tournament_match_list_as_away_team {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.match_goal_list {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.match_card_list {
-            entity.attach_root_recursive(root.clone());
-        }
-        for entity in &mut self.group_standing_list {
-            entity.attach_root_recursive(root.clone());
-        }
-    }
 }

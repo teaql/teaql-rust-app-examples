@@ -52,22 +52,22 @@ impl<'a> DeviceSettingExpression<'a> {
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
-    pub fn get_password(self) -> crate::ValueExpression<'a, String> {
-        let next = self.result.and_then("password", |entity| entity.eval_password());
+    pub fn get_password_hash(self) -> crate::ValueExpression<'a, String> {
+        let next = self.result.and_then("password_hash", |entity| entity.eval_password_hash());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
-    pub fn get_super_password(self) -> crate::ValueExpression<'a, String> {
-        let next = self.result.and_then("super_password", |entity| entity.eval_super_password());
+    pub fn get_super_password_hash(self) -> crate::ValueExpression<'a, String> {
+        let next = self.result.and_then("super_password_hash", |entity| entity.eval_super_password_hash());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
-    pub fn get_create_time(self) -> crate::ValueExpression<'a, chrono::DateTime<chrono::Utc>> {
+    pub fn get_create_time(self) -> crate::ValueExpression<'a, teaql_core::time::Timestamp> {
         let next = self.result.and_then("create_time", |entity| entity.eval_create_time());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
-    pub fn get_update_time(self) -> crate::ValueExpression<'a, chrono::DateTime<chrono::Utc>> {
+    pub fn get_update_time(self) -> crate::ValueExpression<'a, teaql_core::time::Timestamp> {
         let next = self.result.and_then("update_time", |entity| entity.eval_update_time());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }

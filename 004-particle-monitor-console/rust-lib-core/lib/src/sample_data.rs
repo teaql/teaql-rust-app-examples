@@ -1,9 +1,9 @@
+
 use std::collections::BTreeMap;
 use crate::TeaqlRuntime;
 use crate::Q;
-use teaql_core::Entity;
-use crate::request_support::TeaqlUserContextExt;
-use crate::request_support::AuditedSave;
+use teaql_core::Entity as _;
+use crate::request_support::AuditedSave as _;
 
 pub trait IntoU64 {
     fn into_u64(self) -> u64;
@@ -51,6 +51,27 @@ pub struct SampleDataSkipped {
     pub entity: &'static str,
     pub reason: String,
 }
+
+#[derive(Debug)]
+pub struct SampleDataError {
+    message: String,
+}
+
+impl SampleDataError {
+    fn from_display(error: impl std::fmt::Display) -> Self {
+        Self {
+            message: error.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for SampleDataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SampleDataError {}
 
 pub struct SampleDataState {
     pub plan: SampleDataPlan,
@@ -123,30 +144,22 @@ impl SampleDataState {
 }
 
 pub async fn generate_sample_data<C>(
-    ctx: &C,
+    context: &C,
     plan: SampleDataPlan,
-) -> Result<SampleDataReport, String>
+) -> Result<SampleDataReport, SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
     log::info!("Starting sample data generation. Scale: {:?}, Seed: {}", plan.scale, plan.seed);
     let mut state = SampleDataState::new(plan);
 
-    load_root_device_systems(ctx, &mut state).await?; //depth: 0
+    load_root_device_systems(context, &mut state).await?; //depth: 0
 
-    load_constant_system_statuses(ctx, &mut state).await?;
+    load_constant_system_statuses(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_device_settings(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_device_settings(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_sample_records(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_sample_records(context, &mut state).await?;
 
 
     let report = state.into_report();
@@ -155,42 +168,42 @@ where
 }
 
 async fn load_root_device_systems<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::device_systems().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::device_systems().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Device System", item.id().into_u64());
+        state.add_reference(crate::DeviceSystem::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_system_statuses<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::system_statuses().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::system_statuses().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("System Status", item.id().into_u64());
+        state.add_reference(crate::SystemStatus::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn generate_device_settings<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Device System").is_empty() {
-            state.record_skipped("Device Setting", "Required dependency Device System is missing in reference pool".to_string());
+            state.record_skipped(crate::DeviceSetting::ENTITY_NAME, "Required dependency Device System is missing in reference pool".to_string());
             log::info!("Skipped generating Device Setting: Required dependency Device System is missing in reference pool.");
             return Ok(());
         }
@@ -208,7 +221,7 @@ where
     log::info!("Generating sample data for Device Setting (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::device_settings().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::device_settings().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Device System", i as usize, &used_refs) {
@@ -241,27 +254,27 @@ where
                     entity.update_password_enabled(rand_val as i64);
                 }
 
-                entity.update_password(format!("{} {}", "pass_123456", i + 1));
+                entity.update_password_hash(format!("{} {}", "pass_123456", i + 1));
 
-                entity.update_super_password(format!("{} {}", "pass_888888", i + 1));
+                entity.update_super_password_hash(format!("{} {}", "pass_888888", i + 1));
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Device Setting");
+        state.record_generated(crate::DeviceSetting::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Device Setting: {}/{}", i, fanout);
@@ -275,20 +288,20 @@ entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
 
 
 async fn generate_sample_records<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Device System").is_empty() {
-            state.record_skipped("Sample Record", "Required dependency Device System is missing in reference pool".to_string());
+            state.record_skipped(crate::SampleRecord::ENTITY_NAME, "Required dependency Device System is missing in reference pool".to_string());
             log::info!("Skipped generating Sample Record: Required dependency Device System is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("System Status").is_empty() {
-            state.record_skipped("Sample Record", "Required dependency System Status is missing in reference pool".to_string());
+            state.record_skipped(crate::SampleRecord::ENTITY_NAME, "Required dependency System Status is missing in reference pool".to_string());
             log::info!("Skipped generating Sample Record: Required dependency System Status is missing in reference pool.");
             return Ok(());
         }
@@ -306,7 +319,7 @@ where
     log::info!("Generating sample data for Sample Record (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::sample_records().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::sample_records().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Device System", i as usize, &used_refs) {
@@ -324,7 +337,7 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_sample_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_sample_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
@@ -390,14 +403,14 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Sample Record");
+        state.record_generated(crate::SampleRecord::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Sample Record: {}/{}", i, fanout);

@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
-use teaql_runtime::{DataServiceError, RuntimeError};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
+use teaql_runtime::RuntimeError;
 
 use crate::request_support::*;
 
@@ -98,171 +98,165 @@ impl<R> DeviceSystemRequest<R> {
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let repository = ctx
-            .device_system_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = authorize_query(apply_runtime_metadata(
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "DeviceSystem",
+                query,
+                relation_aggregates,
+            ).await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "DeviceSystem",
+                query.clone(),
+                relation_aggregates,
+            ).await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
-    pub(crate) async fn _execute_for_stream<'a, C>(
+    pub(crate) async fn _execute_for_rows<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .device_system_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
         let query = authorize_query(apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let chunks = repository.fetch_stream(&query)
-            .await?;
-        Ok(chunks)
+        ))?;
+        context.fetch_compact_smart_list("DeviceSystem", &query).await
+    }
+
+    pub(crate) async fn _execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<TeaqlEntityStream<'a, R, RuntimeError>, RuntimeError>
+    where
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
+    {
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))?;
+        Ok(context.fetch_entity_stream("DeviceSystem", query))
     }
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
 
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self.page_offset(offset, limit)._execute_for_list(context).await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<u64, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<u64, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .device_system_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query = apply_runtime_metadata(
+            self.query,
+            &query_options,
+            &self.child_enhancements,
+        );
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
         query.slice = None;
         query.relations.clear();
         query = query.count(COUNT_ALIAS);
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("DeviceSystem", &query).await?;
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for DeviceSystem is missing or not numeric"))))
+            .ok_or_else(|| RuntimeError::Graph(format!("count result for DeviceSystem is missing or not numeric")))
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .device_system_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query.limit(1);
-        query.relations.clear();
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
-        Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .device_system_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
+        let mut query = apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
+        ).limit(1);
+        query.relations.clear();
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("DeviceSystem", &query).await?;
+        Ok(!rows.is_empty())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -534,6 +528,17 @@ impl<R> DeviceSystemRequest<R> {
         self
     }
 
+    pub fn stream(mut self, chunk_size: usize) -> Self {
+        assert!(chunk_size > 0, "stream chunk size must be positive");
+        self.query = self.query.stream(chunk_size);
+        self
+    }
+
+    pub fn stream_default(mut self) -> Self {
+        self.query = self.query.stream_default();
+        self
+    }
+
     pub fn skip(mut self, offset: u64) -> Self {
         self.query = self.query.offset(offset);
         self
@@ -549,6 +554,47 @@ impl<R> DeviceSystemRequest<R> {
 
     pub fn page_offset(mut self, offset: u64, limit: u64) -> Self {
         self.query = self.query.page(offset, limit);
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch(mut self) -> Self {
+        self.query = self.query.optimize_for_continuous_page_fetch();
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch_with(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -619,6 +665,14 @@ impl<R> DeviceSystemRequest<R> {
     pub fn group_by(mut self, field: impl Into<String>) -> Self {
         self.query = self.query.group_by(field);
         self
+    }
+
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
     }
 
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
@@ -1929,10 +1983,6 @@ impl<R> DeviceSystemRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn name_is_pms_gt660x_terminal(self) -> Self {
-        self.with_name_is("PMS-GT660X Terminal")
-    }
-
     pub fn with_name_is_pms_gt660x_terminal(self) -> Self {
         self.with_name_is("PMS-GT660X Terminal")
     }
@@ -1944,10 +1994,6 @@ impl<R> DeviceSystemRequest<R> {
     }
 
 
-
-    pub fn serial_number_is_pms_2026_0701(self) -> Self {
-        self.with_serial_number_is("PMS-2026-0701")
-    }
 
     pub fn with_serial_number_is_pms_2026_0701(self) -> Self {
         self.with_serial_number_is("PMS-2026-0701")
@@ -1961,10 +2007,6 @@ impl<R> DeviceSystemRequest<R> {
 
 
 
-    pub fn create_time_is_create_time(self) -> Self {
-        self.with_create_time_is("createTime()")
-    }
-
     pub fn with_create_time_is_create_time(self) -> Self {
         self.with_create_time_is("createTime()")
     }
@@ -1976,10 +2018,6 @@ impl<R> DeviceSystemRequest<R> {
     }
 
 
-
-    pub fn update_time_is_update_time(self) -> Self {
-        self.with_update_time_is("updateTime()")
-    }
 
     pub fn with_update_time_is_update_time(self) -> Self {
         self.with_update_time_is("updateTime()")
@@ -1995,11 +2033,11 @@ impl<R> DeviceSystemRequest<R> {
 
 
     pub fn have_system_statuses(self) -> Self {
-        self.with_system_status_list_matching(SelectQuery::new("SystemStatus"))
+        self.with_system_status_list_matching(crate::Q::system_statuses_minimal())
     }
 
     pub fn have_no_system_statuses(self) -> Self {
-        self.without_system_status_list_matching(SelectQuery::new("SystemStatus"))
+        self.without_system_status_list_matching(crate::Q::system_statuses_minimal())
     }
 
     pub fn with_system_status_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2033,17 +2071,16 @@ impl<R> DeviceSystemRequest<R> {
 
     pub fn select_system_status_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("system_status_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("system_status_list", selection));
+        self.query = self.query.relation_query("system_status_list", selection.into_query());
         self
 }
 
     pub fn have_device_settings(self) -> Self {
-        self.with_device_setting_list_matching(SelectQuery::new("DeviceSetting"))
+        self.with_device_setting_list_matching(crate::Q::device_settings_minimal())
     }
 
     pub fn have_no_device_settings(self) -> Self {
-        self.without_device_setting_list_matching(SelectQuery::new("DeviceSetting"))
+        self.without_device_setting_list_matching(crate::Q::device_settings_minimal())
     }
 
     pub fn with_device_setting_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2077,17 +2114,16 @@ impl<R> DeviceSystemRequest<R> {
 
     pub fn select_device_setting_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("device_setting_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("device_setting_list", selection));
+        self.query = self.query.relation_query("device_setting_list", selection.into_query());
         self
 }
 
     pub fn have_sample_records(self) -> Self {
-        self.with_sample_record_list_matching(SelectQuery::new("SampleRecord"))
+        self.with_sample_record_list_matching(crate::Q::sample_records_minimal())
     }
 
     pub fn have_no_sample_records(self) -> Self {
-        self.without_sample_record_list_matching(SelectQuery::new("SampleRecord"))
+        self.without_sample_record_list_matching(crate::Q::sample_records_minimal())
     }
 
     pub fn with_sample_record_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2121,8 +2157,7 @@ impl<R> DeviceSystemRequest<R> {
 
     pub fn select_sample_record_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("sample_record_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("sample_record_list", selection));
+        self.query = self.query.relation_query("sample_record_list", selection.into_query());
         self
 }
     pub fn count_system_statuses(self) -> Self {
@@ -2155,6 +2190,17 @@ impl<R> DeviceSystemRequest<R> {
             alias,
             selection,
             false,
+        ));
+        self
+    }
+
+    fn scalar_from_system_statuses_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query_options.relation_aggregates.push(RelationAggregate::new(
+            "system_status_list",
+            alias,
+            selection,
+            true,
         ));
         self
     }
@@ -2200,6 +2246,17 @@ impl<R> DeviceSystemRequest<R> {
         self
     }
 
+    fn scalar_from_device_settings_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query_options.relation_aggregates.push(RelationAggregate::new(
+            "device_setting_list",
+            alias,
+            selection,
+            true,
+        ));
+        self
+    }
+
     pub fn group_by_device_settings_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_device_settings(request)
     }
@@ -2210,252 +2267,252 @@ impl<R> DeviceSystemRequest<R> {
     }
 
     pub fn sum_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().sum("calibration_point", "sum_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().sum("calibration_point", "sum_calibration_point"))
     }
     pub fn min_calibration_point_of_device_settings(self) -> Self {
         self.min_calibration_point_of_device_settings_as("min_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("calibration_point", "min_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("calibration_point", "min_calibration_point"))
     }
     pub fn max_calibration_point_of_device_settings(self) -> Self {
         self.max_calibration_point_of_device_settings_as("max_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("calibration_point", "max_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("calibration_point", "max_calibration_point"))
     }
     pub fn avg_calibration_point_of_device_settings(self) -> Self {
         self.avg_calibration_point_of_device_settings_as("avg_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn avg_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().avg("calibration_point", "avg_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().avg("calibration_point", "avg_calibration_point"))
     }
     pub fn standard_deviation_calibration_point_of_device_settings(self) -> Self {
         self.standard_deviation_calibration_point_of_device_settings_as("standard_deviation_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn standard_deviation_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev("calibration_point", "stdDev_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev("calibration_point", "stdDev_calibration_point"))
     }
     pub fn square_root_of_population_standard_deviation_calibration_point_of_device_settings(self) -> Self {
         self.square_root_of_population_standard_deviation_calibration_point_of_device_settings_as("square_root_of_population_standard_deviation_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev_pop("calibration_point", "stdDevPop_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev_pop("calibration_point", "stdDevPop_calibration_point"))
     }
     pub fn sample_variance_calibration_point_of_device_settings(self) -> Self {
         self.sample_variance_calibration_point_of_device_settings_as("sample_variance_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_variance_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_samp("calibration_point", "varSamp_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_samp("calibration_point", "varSamp_calibration_point"))
     }
     pub fn sample_population_variance_calibration_point_of_device_settings(self) -> Self {
         self.sample_population_variance_calibration_point_of_device_settings_as("sample_population_variance_calibration_point_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_population_variance_calibration_point_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_pop("calibration_point", "varPop_calibration_point"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_pop("calibration_point", "varPop_calibration_point"))
     }
     pub fn sum_data_keep_days_of_device_settings(self) -> Self {
         self.sum_data_keep_days_of_device_settings_as("sum_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sum_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().sum("data_keep_days", "sum_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().sum("data_keep_days", "sum_data_keep_days"))
     }
     pub fn min_data_keep_days_of_device_settings(self) -> Self {
         self.min_data_keep_days_of_device_settings_as("min_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("data_keep_days", "min_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("data_keep_days", "min_data_keep_days"))
     }
     pub fn max_data_keep_days_of_device_settings(self) -> Self {
         self.max_data_keep_days_of_device_settings_as("max_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("data_keep_days", "max_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("data_keep_days", "max_data_keep_days"))
     }
     pub fn avg_data_keep_days_of_device_settings(self) -> Self {
         self.avg_data_keep_days_of_device_settings_as("avg_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn avg_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().avg("data_keep_days", "avg_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().avg("data_keep_days", "avg_data_keep_days"))
     }
     pub fn standard_deviation_data_keep_days_of_device_settings(self) -> Self {
         self.standard_deviation_data_keep_days_of_device_settings_as("standard_deviation_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn standard_deviation_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev("data_keep_days", "stdDev_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev("data_keep_days", "stdDev_data_keep_days"))
     }
     pub fn square_root_of_population_standard_deviation_data_keep_days_of_device_settings(self) -> Self {
         self.square_root_of_population_standard_deviation_data_keep_days_of_device_settings_as("square_root_of_population_standard_deviation_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev_pop("data_keep_days", "stdDevPop_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev_pop("data_keep_days", "stdDevPop_data_keep_days"))
     }
     pub fn sample_variance_data_keep_days_of_device_settings(self) -> Self {
         self.sample_variance_data_keep_days_of_device_settings_as("sample_variance_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_variance_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_samp("data_keep_days", "varSamp_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_samp("data_keep_days", "varSamp_data_keep_days"))
     }
     pub fn sample_population_variance_data_keep_days_of_device_settings(self) -> Self {
         self.sample_population_variance_data_keep_days_of_device_settings_as("sample_population_variance_data_keep_days_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_population_variance_data_keep_days_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_pop("data_keep_days", "varPop_data_keep_days"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_pop("data_keep_days", "varPop_data_keep_days"))
     }
     pub fn sum_sampling_frequency_of_device_settings(self) -> Self {
         self.sum_sampling_frequency_of_device_settings_as("sum_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sum_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().sum("sampling_frequency", "sum_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().sum("sampling_frequency", "sum_sampling_frequency"))
     }
     pub fn min_sampling_frequency_of_device_settings(self) -> Self {
         self.min_sampling_frequency_of_device_settings_as("min_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("sampling_frequency", "min_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("sampling_frequency", "min_sampling_frequency"))
     }
     pub fn max_sampling_frequency_of_device_settings(self) -> Self {
         self.max_sampling_frequency_of_device_settings_as("max_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("sampling_frequency", "max_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("sampling_frequency", "max_sampling_frequency"))
     }
     pub fn avg_sampling_frequency_of_device_settings(self) -> Self {
         self.avg_sampling_frequency_of_device_settings_as("avg_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn avg_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().avg("sampling_frequency", "avg_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().avg("sampling_frequency", "avg_sampling_frequency"))
     }
     pub fn standard_deviation_sampling_frequency_of_device_settings(self) -> Self {
         self.standard_deviation_sampling_frequency_of_device_settings_as("standard_deviation_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn standard_deviation_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev("sampling_frequency", "stdDev_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev("sampling_frequency", "stdDev_sampling_frequency"))
     }
     pub fn square_root_of_population_standard_deviation_sampling_frequency_of_device_settings(self) -> Self {
         self.square_root_of_population_standard_deviation_sampling_frequency_of_device_settings_as("square_root_of_population_standard_deviation_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev_pop("sampling_frequency", "stdDevPop_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev_pop("sampling_frequency", "stdDevPop_sampling_frequency"))
     }
     pub fn sample_variance_sampling_frequency_of_device_settings(self) -> Self {
         self.sample_variance_sampling_frequency_of_device_settings_as("sample_variance_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_variance_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_samp("sampling_frequency", "varSamp_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_samp("sampling_frequency", "varSamp_sampling_frequency"))
     }
     pub fn sample_population_variance_sampling_frequency_of_device_settings(self) -> Self {
         self.sample_population_variance_sampling_frequency_of_device_settings_as("sample_population_variance_sampling_frequency_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_population_variance_sampling_frequency_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_pop("sampling_frequency", "varPop_sampling_frequency"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_pop("sampling_frequency", "varPop_sampling_frequency"))
     }
     pub fn sum_password_enabled_of_device_settings(self) -> Self {
         self.sum_password_enabled_of_device_settings_as("sum_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sum_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().sum("password_enabled", "sum_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().sum("password_enabled", "sum_password_enabled"))
     }
     pub fn min_password_enabled_of_device_settings(self) -> Self {
         self.min_password_enabled_of_device_settings_as("min_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("password_enabled", "min_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("password_enabled", "min_password_enabled"))
     }
     pub fn max_password_enabled_of_device_settings(self) -> Self {
         self.max_password_enabled_of_device_settings_as("max_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("password_enabled", "max_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("password_enabled", "max_password_enabled"))
     }
     pub fn avg_password_enabled_of_device_settings(self) -> Self {
         self.avg_password_enabled_of_device_settings_as("avg_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn avg_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().avg("password_enabled", "avg_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().avg("password_enabled", "avg_password_enabled"))
     }
     pub fn standard_deviation_password_enabled_of_device_settings(self) -> Self {
         self.standard_deviation_password_enabled_of_device_settings_as("standard_deviation_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn standard_deviation_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev("password_enabled", "stdDev_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev("password_enabled", "stdDev_password_enabled"))
     }
     pub fn square_root_of_population_standard_deviation_password_enabled_of_device_settings(self) -> Self {
         self.square_root_of_population_standard_deviation_password_enabled_of_device_settings_as("square_root_of_population_standard_deviation_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().stddev_pop("password_enabled", "stdDevPop_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().stddev_pop("password_enabled", "stdDevPop_password_enabled"))
     }
     pub fn sample_variance_password_enabled_of_device_settings(self) -> Self {
         self.sample_variance_password_enabled_of_device_settings_as("sample_variance_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_variance_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_samp("password_enabled", "varSamp_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_samp("password_enabled", "varSamp_password_enabled"))
     }
     pub fn sample_population_variance_password_enabled_of_device_settings(self) -> Self {
         self.sample_population_variance_password_enabled_of_device_settings_as("sample_population_variance_password_enabled_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn sample_population_variance_password_enabled_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().var_pop("password_enabled", "varPop_password_enabled"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().var_pop("password_enabled", "varPop_password_enabled"))
     }
     pub fn min_create_time_of_device_settings(self) -> Self {
         self.min_create_time_of_device_settings_as("min_create_time_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_create_time_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("create_time", "min_create_time"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("create_time", "min_create_time"))
     }
     pub fn max_create_time_of_device_settings(self) -> Self {
         self.max_create_time_of_device_settings_as("max_create_time_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_create_time_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("create_time", "max_create_time"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("create_time", "max_create_time"))
     }
     pub fn min_update_time_of_device_settings(self) -> Self {
         self.min_update_time_of_device_settings_as("min_update_time_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn min_update_time_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().min("update_time", "min_update_time"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().min("update_time", "min_update_time"))
     }
     pub fn max_update_time_of_device_settings(self) -> Self {
         self.max_update_time_of_device_settings_as("max_update_time_of_device_settings", crate::Q::device_settings().unlimited())
     }
 
     pub fn max_update_time_of_device_settings_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_device_settings_as(alias, request.into().into_query().max("update_time", "max_update_time"))
+        self.scalar_from_device_settings_as(alias, request.into().into_query().max("update_time", "max_update_time"))
     }
 
     pub fn count_sample_records(self) -> Self {
@@ -2492,6 +2549,17 @@ impl<R> DeviceSystemRequest<R> {
         self
     }
 
+    fn scalar_from_sample_records_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query_options.relation_aggregates.push(RelationAggregate::new(
+            "sample_record_list",
+            alias,
+            selection,
+            true,
+        ));
+        self
+    }
+
     pub fn group_by_sample_records_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_sample_records(request)
     }
@@ -2502,588 +2570,588 @@ impl<R> DeviceSystemRequest<R> {
     }
 
     pub fn min_sample_time_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("sample_time", "min_sample_time"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("sample_time", "min_sample_time"))
     }
     pub fn max_sample_time_of_sample_records(self) -> Self {
         self.max_sample_time_of_sample_records_as("max_sample_time_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_sample_time_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("sample_time", "max_sample_time"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("sample_time", "max_sample_time"))
     }
     pub fn sum_gas_of_sample_records(self) -> Self {
         self.sum_gas_of_sample_records_as("sum_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("gas", "sum_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("gas", "sum_gas"))
     }
     pub fn min_gas_of_sample_records(self) -> Self {
         self.min_gas_of_sample_records_as("min_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("gas", "min_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("gas", "min_gas"))
     }
     pub fn max_gas_of_sample_records(self) -> Self {
         self.max_gas_of_sample_records_as("max_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("gas", "max_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("gas", "max_gas"))
     }
     pub fn avg_gas_of_sample_records(self) -> Self {
         self.avg_gas_of_sample_records_as("avg_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("gas", "avg_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("gas", "avg_gas"))
     }
     pub fn standard_deviation_gas_of_sample_records(self) -> Self {
         self.standard_deviation_gas_of_sample_records_as("standard_deviation_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("gas", "stdDev_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("gas", "stdDev_gas"))
     }
     pub fn square_root_of_population_standard_deviation_gas_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_gas_of_sample_records_as("square_root_of_population_standard_deviation_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("gas", "stdDevPop_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("gas", "stdDevPop_gas"))
     }
     pub fn sample_variance_gas_of_sample_records(self) -> Self {
         self.sample_variance_gas_of_sample_records_as("sample_variance_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("gas", "varSamp_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("gas", "varSamp_gas"))
     }
     pub fn sample_population_variance_gas_of_sample_records(self) -> Self {
         self.sample_population_variance_gas_of_sample_records_as("sample_population_variance_gas_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_gas_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("gas", "varPop_gas"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("gas", "varPop_gas"))
     }
     pub fn sum_lref_of_sample_records(self) -> Self {
         self.sum_lref_of_sample_records_as("sum_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("lref", "sum_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("lref", "sum_lref"))
     }
     pub fn min_lref_of_sample_records(self) -> Self {
         self.min_lref_of_sample_records_as("min_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("lref", "min_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("lref", "min_lref"))
     }
     pub fn max_lref_of_sample_records(self) -> Self {
         self.max_lref_of_sample_records_as("max_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("lref", "max_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("lref", "max_lref"))
     }
     pub fn avg_lref_of_sample_records(self) -> Self {
         self.avg_lref_of_sample_records_as("avg_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("lref", "avg_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("lref", "avg_lref"))
     }
     pub fn standard_deviation_lref_of_sample_records(self) -> Self {
         self.standard_deviation_lref_of_sample_records_as("standard_deviation_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("lref", "stdDev_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("lref", "stdDev_lref"))
     }
     pub fn square_root_of_population_standard_deviation_lref_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_lref_of_sample_records_as("square_root_of_population_standard_deviation_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("lref", "stdDevPop_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("lref", "stdDevPop_lref"))
     }
     pub fn sample_variance_lref_of_sample_records(self) -> Self {
         self.sample_variance_lref_of_sample_records_as("sample_variance_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("lref", "varSamp_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("lref", "varSamp_lref"))
     }
     pub fn sample_population_variance_lref_of_sample_records(self) -> Self {
         self.sample_population_variance_lref_of_sample_records_as("sample_population_variance_lref_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_lref_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("lref", "varPop_lref"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("lref", "varPop_lref"))
     }
     pub fn sum_impurity1_of_sample_records(self) -> Self {
         self.sum_impurity1_of_sample_records_as("sum_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity1", "sum_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity1", "sum_impurity1"))
     }
     pub fn min_impurity1_of_sample_records(self) -> Self {
         self.min_impurity1_of_sample_records_as("min_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity1", "min_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity1", "min_impurity1"))
     }
     pub fn max_impurity1_of_sample_records(self) -> Self {
         self.max_impurity1_of_sample_records_as("max_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity1", "max_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity1", "max_impurity1"))
     }
     pub fn avg_impurity1_of_sample_records(self) -> Self {
         self.avg_impurity1_of_sample_records_as("avg_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity1", "avg_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity1", "avg_impurity1"))
     }
     pub fn standard_deviation_impurity1_of_sample_records(self) -> Self {
         self.standard_deviation_impurity1_of_sample_records_as("standard_deviation_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity1", "stdDev_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity1", "stdDev_impurity1"))
     }
     pub fn square_root_of_population_standard_deviation_impurity1_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity1_of_sample_records_as("square_root_of_population_standard_deviation_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity1", "stdDevPop_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity1", "stdDevPop_impurity1"))
     }
     pub fn sample_variance_impurity1_of_sample_records(self) -> Self {
         self.sample_variance_impurity1_of_sample_records_as("sample_variance_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity1", "varSamp_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity1", "varSamp_impurity1"))
     }
     pub fn sample_population_variance_impurity1_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity1_of_sample_records_as("sample_population_variance_impurity1_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity1_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity1", "varPop_impurity1"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity1", "varPop_impurity1"))
     }
     pub fn sum_impurity2_of_sample_records(self) -> Self {
         self.sum_impurity2_of_sample_records_as("sum_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity2", "sum_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity2", "sum_impurity2"))
     }
     pub fn min_impurity2_of_sample_records(self) -> Self {
         self.min_impurity2_of_sample_records_as("min_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity2", "min_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity2", "min_impurity2"))
     }
     pub fn max_impurity2_of_sample_records(self) -> Self {
         self.max_impurity2_of_sample_records_as("max_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity2", "max_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity2", "max_impurity2"))
     }
     pub fn avg_impurity2_of_sample_records(self) -> Self {
         self.avg_impurity2_of_sample_records_as("avg_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity2", "avg_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity2", "avg_impurity2"))
     }
     pub fn standard_deviation_impurity2_of_sample_records(self) -> Self {
         self.standard_deviation_impurity2_of_sample_records_as("standard_deviation_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity2", "stdDev_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity2", "stdDev_impurity2"))
     }
     pub fn square_root_of_population_standard_deviation_impurity2_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity2_of_sample_records_as("square_root_of_population_standard_deviation_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity2", "stdDevPop_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity2", "stdDevPop_impurity2"))
     }
     pub fn sample_variance_impurity2_of_sample_records(self) -> Self {
         self.sample_variance_impurity2_of_sample_records_as("sample_variance_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity2", "varSamp_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity2", "varSamp_impurity2"))
     }
     pub fn sample_population_variance_impurity2_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity2_of_sample_records_as("sample_population_variance_impurity2_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity2_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity2", "varPop_impurity2"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity2", "varPop_impurity2"))
     }
     pub fn sum_impurity3_of_sample_records(self) -> Self {
         self.sum_impurity3_of_sample_records_as("sum_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity3", "sum_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity3", "sum_impurity3"))
     }
     pub fn min_impurity3_of_sample_records(self) -> Self {
         self.min_impurity3_of_sample_records_as("min_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity3", "min_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity3", "min_impurity3"))
     }
     pub fn max_impurity3_of_sample_records(self) -> Self {
         self.max_impurity3_of_sample_records_as("max_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity3", "max_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity3", "max_impurity3"))
     }
     pub fn avg_impurity3_of_sample_records(self) -> Self {
         self.avg_impurity3_of_sample_records_as("avg_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity3", "avg_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity3", "avg_impurity3"))
     }
     pub fn standard_deviation_impurity3_of_sample_records(self) -> Self {
         self.standard_deviation_impurity3_of_sample_records_as("standard_deviation_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity3", "stdDev_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity3", "stdDev_impurity3"))
     }
     pub fn square_root_of_population_standard_deviation_impurity3_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity3_of_sample_records_as("square_root_of_population_standard_deviation_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity3", "stdDevPop_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity3", "stdDevPop_impurity3"))
     }
     pub fn sample_variance_impurity3_of_sample_records(self) -> Self {
         self.sample_variance_impurity3_of_sample_records_as("sample_variance_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity3", "varSamp_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity3", "varSamp_impurity3"))
     }
     pub fn sample_population_variance_impurity3_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity3_of_sample_records_as("sample_population_variance_impurity3_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity3_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity3", "varPop_impurity3"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity3", "varPop_impurity3"))
     }
     pub fn sum_impurity4_of_sample_records(self) -> Self {
         self.sum_impurity4_of_sample_records_as("sum_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity4", "sum_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity4", "sum_impurity4"))
     }
     pub fn min_impurity4_of_sample_records(self) -> Self {
         self.min_impurity4_of_sample_records_as("min_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity4", "min_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity4", "min_impurity4"))
     }
     pub fn max_impurity4_of_sample_records(self) -> Self {
         self.max_impurity4_of_sample_records_as("max_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity4", "max_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity4", "max_impurity4"))
     }
     pub fn avg_impurity4_of_sample_records(self) -> Self {
         self.avg_impurity4_of_sample_records_as("avg_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity4", "avg_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity4", "avg_impurity4"))
     }
     pub fn standard_deviation_impurity4_of_sample_records(self) -> Self {
         self.standard_deviation_impurity4_of_sample_records_as("standard_deviation_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity4", "stdDev_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity4", "stdDev_impurity4"))
     }
     pub fn square_root_of_population_standard_deviation_impurity4_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity4_of_sample_records_as("square_root_of_population_standard_deviation_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity4", "stdDevPop_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity4", "stdDevPop_impurity4"))
     }
     pub fn sample_variance_impurity4_of_sample_records(self) -> Self {
         self.sample_variance_impurity4_of_sample_records_as("sample_variance_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity4", "varSamp_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity4", "varSamp_impurity4"))
     }
     pub fn sample_population_variance_impurity4_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity4_of_sample_records_as("sample_population_variance_impurity4_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity4_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity4", "varPop_impurity4"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity4", "varPop_impurity4"))
     }
     pub fn sum_impurity5_of_sample_records(self) -> Self {
         self.sum_impurity5_of_sample_records_as("sum_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity5", "sum_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity5", "sum_impurity5"))
     }
     pub fn min_impurity5_of_sample_records(self) -> Self {
         self.min_impurity5_of_sample_records_as("min_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity5", "min_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity5", "min_impurity5"))
     }
     pub fn max_impurity5_of_sample_records(self) -> Self {
         self.max_impurity5_of_sample_records_as("max_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity5", "max_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity5", "max_impurity5"))
     }
     pub fn avg_impurity5_of_sample_records(self) -> Self {
         self.avg_impurity5_of_sample_records_as("avg_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity5", "avg_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity5", "avg_impurity5"))
     }
     pub fn standard_deviation_impurity5_of_sample_records(self) -> Self {
         self.standard_deviation_impurity5_of_sample_records_as("standard_deviation_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity5", "stdDev_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity5", "stdDev_impurity5"))
     }
     pub fn square_root_of_population_standard_deviation_impurity5_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity5_of_sample_records_as("square_root_of_population_standard_deviation_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity5", "stdDevPop_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity5", "stdDevPop_impurity5"))
     }
     pub fn sample_variance_impurity5_of_sample_records(self) -> Self {
         self.sample_variance_impurity5_of_sample_records_as("sample_variance_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity5", "varSamp_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity5", "varSamp_impurity5"))
     }
     pub fn sample_population_variance_impurity5_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity5_of_sample_records_as("sample_population_variance_impurity5_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity5_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity5", "varPop_impurity5"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity5", "varPop_impurity5"))
     }
     pub fn sum_impurity6_of_sample_records(self) -> Self {
         self.sum_impurity6_of_sample_records_as("sum_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity6", "sum_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity6", "sum_impurity6"))
     }
     pub fn min_impurity6_of_sample_records(self) -> Self {
         self.min_impurity6_of_sample_records_as("min_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity6", "min_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity6", "min_impurity6"))
     }
     pub fn max_impurity6_of_sample_records(self) -> Self {
         self.max_impurity6_of_sample_records_as("max_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity6", "max_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity6", "max_impurity6"))
     }
     pub fn avg_impurity6_of_sample_records(self) -> Self {
         self.avg_impurity6_of_sample_records_as("avg_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity6", "avg_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity6", "avg_impurity6"))
     }
     pub fn standard_deviation_impurity6_of_sample_records(self) -> Self {
         self.standard_deviation_impurity6_of_sample_records_as("standard_deviation_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity6", "stdDev_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity6", "stdDev_impurity6"))
     }
     pub fn square_root_of_population_standard_deviation_impurity6_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity6_of_sample_records_as("square_root_of_population_standard_deviation_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity6", "stdDevPop_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity6", "stdDevPop_impurity6"))
     }
     pub fn sample_variance_impurity6_of_sample_records(self) -> Self {
         self.sample_variance_impurity6_of_sample_records_as("sample_variance_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity6", "varSamp_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity6", "varSamp_impurity6"))
     }
     pub fn sample_population_variance_impurity6_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity6_of_sample_records_as("sample_population_variance_impurity6_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity6_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity6", "varPop_impurity6"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity6", "varPop_impurity6"))
     }
     pub fn sum_impurity7_of_sample_records(self) -> Self {
         self.sum_impurity7_of_sample_records_as("sum_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity7", "sum_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity7", "sum_impurity7"))
     }
     pub fn min_impurity7_of_sample_records(self) -> Self {
         self.min_impurity7_of_sample_records_as("min_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity7", "min_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity7", "min_impurity7"))
     }
     pub fn max_impurity7_of_sample_records(self) -> Self {
         self.max_impurity7_of_sample_records_as("max_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity7", "max_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity7", "max_impurity7"))
     }
     pub fn avg_impurity7_of_sample_records(self) -> Self {
         self.avg_impurity7_of_sample_records_as("avg_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity7", "avg_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity7", "avg_impurity7"))
     }
     pub fn standard_deviation_impurity7_of_sample_records(self) -> Self {
         self.standard_deviation_impurity7_of_sample_records_as("standard_deviation_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity7", "stdDev_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity7", "stdDev_impurity7"))
     }
     pub fn square_root_of_population_standard_deviation_impurity7_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity7_of_sample_records_as("square_root_of_population_standard_deviation_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity7", "stdDevPop_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity7", "stdDevPop_impurity7"))
     }
     pub fn sample_variance_impurity7_of_sample_records(self) -> Self {
         self.sample_variance_impurity7_of_sample_records_as("sample_variance_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity7", "varSamp_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity7", "varSamp_impurity7"))
     }
     pub fn sample_population_variance_impurity7_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity7_of_sample_records_as("sample_population_variance_impurity7_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity7_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity7", "varPop_impurity7"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity7", "varPop_impurity7"))
     }
     pub fn sum_impurity8_of_sample_records(self) -> Self {
         self.sum_impurity8_of_sample_records_as("sum_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sum_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().sum("impurity8", "sum_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().sum("impurity8", "sum_impurity8"))
     }
     pub fn min_impurity8_of_sample_records(self) -> Self {
         self.min_impurity8_of_sample_records_as("min_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("impurity8", "min_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("impurity8", "min_impurity8"))
     }
     pub fn max_impurity8_of_sample_records(self) -> Self {
         self.max_impurity8_of_sample_records_as("max_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("impurity8", "max_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("impurity8", "max_impurity8"))
     }
     pub fn avg_impurity8_of_sample_records(self) -> Self {
         self.avg_impurity8_of_sample_records_as("avg_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn avg_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().avg("impurity8", "avg_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().avg("impurity8", "avg_impurity8"))
     }
     pub fn standard_deviation_impurity8_of_sample_records(self) -> Self {
         self.standard_deviation_impurity8_of_sample_records_as("standard_deviation_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn standard_deviation_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev("impurity8", "stdDev_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev("impurity8", "stdDev_impurity8"))
     }
     pub fn square_root_of_population_standard_deviation_impurity8_of_sample_records(self) -> Self {
         self.square_root_of_population_standard_deviation_impurity8_of_sample_records_as("square_root_of_population_standard_deviation_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity8", "stdDevPop_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().stddev_pop("impurity8", "stdDevPop_impurity8"))
     }
     pub fn sample_variance_impurity8_of_sample_records(self) -> Self {
         self.sample_variance_impurity8_of_sample_records_as("sample_variance_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_variance_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_samp("impurity8", "varSamp_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_samp("impurity8", "varSamp_impurity8"))
     }
     pub fn sample_population_variance_impurity8_of_sample_records(self) -> Self {
         self.sample_population_variance_impurity8_of_sample_records_as("sample_population_variance_impurity8_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn sample_population_variance_impurity8_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().var_pop("impurity8", "varPop_impurity8"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().var_pop("impurity8", "varPop_impurity8"))
     }
     pub fn min_create_time_of_sample_records(self) -> Self {
         self.min_create_time_of_sample_records_as("min_create_time_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn min_create_time_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().min("create_time", "min_create_time"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().min("create_time", "min_create_time"))
     }
     pub fn max_create_time_of_sample_records(self) -> Self {
         self.max_create_time_of_sample_records_as("max_create_time_of_sample_records", crate::Q::sample_records().unlimited())
     }
 
     pub fn max_create_time_of_sample_records_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_sample_records_as(alias, request.into().into_query().max("create_time", "max_create_time"))
+        self.scalar_from_sample_records_as(alias, request.into().into_query().max("create_time", "max_create_time"))
     }
 }
 
@@ -3113,28 +3181,40 @@ impl<R> From< DeviceSystemRequest<R> > for QuerySelection {
 
 
 impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::DeviceSystem> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+where C: crate::TeaqlRuntime + ?Sized + 'a
 {
-    type Error = crate::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Error = teaql_runtime::RuntimeError;
+    type Entity = crate::DeviceSystem;
+    fn save(self, context: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + Send + '_>> {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
-                .await
-                .map_err(DataServiceError::Runtime)
+            context.save_audited_entity(self).await
         })
     }
 }
 
 impl<R: teaql_core::Entity> crate::PurposedQuery<DeviceSystemRequest<R>> {
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::DeviceSystem
+    pub fn comment(mut self, comment: impl Into<String>) -> Self {
+        self.inner.query_options.comment = Some(comment.into());
+        self
+    }
+
+    pub fn new_entity<C>(&self, context: &C) -> crate::DeviceSystem
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        crate::DeviceSystem::runtime_new(ctx.user_context().entity_root())
+        self.require_comment();
+        let mut entity = crate::DeviceSystem::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context.user_context().next_id(crate::DeviceSystem::ENTITY_NAME) {
+            entity.update_id(id);
+        }
+        teaql_core::Entity::mark_as_new(&mut entity);
+        entity
     }
 
     fn into_inner_with_trace(mut self) -> DeviceSystemRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
+        self.require_comment();
+        self.inner.query.trace_chain.push(teaql_core::TraceNode::typed(
+            teaql_core::TraceKind::Purpose,
             self.inner.query.entity.clone(),
             None,
             self.purpose,
@@ -3142,78 +3222,86 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<DeviceSystemRequest<R>> {
         self.inner
     }
 
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
+    }
+
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    ) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()._execute_for_page(context, offset, limit).await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()._execute_for_exists(context).await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()._execute_for_list(context).await
     }
 
-    /// Execute query in streaming mode (chunked).
-    /// Returns a Vec of StreamChunk, each containing up to chunk_size rows.
+    pub async fn execute_for_rows<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<teaql_core::CompactRow>, teaql_runtime::RuntimeError>
+    where
+        C: crate::TeaqlRuntime + ?Sized,
+    {
+        self.into_inner_with_trace()._execute_for_rows(context).await
+    }
+
+    /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(self, context: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, teaql_runtime::RuntimeError>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()._execute_for_stream(context).await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()._execute_for_first(context).await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
 
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(self, context: &'a C) -> Result<u64, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::DeviceSystemRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()._execute_for_count(context).await
     }
 }

@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
-use teaql_runtime::{DataServiceError, RuntimeError};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
+use teaql_runtime::RuntimeError;
 
 use crate::request_support::*;
 
@@ -98,171 +98,165 @@ impl<R> MatchStageRequest<R> {
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let repository = ctx
-            .match_stage_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = authorize_query(apply_runtime_metadata(
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "MatchStage",
+                query,
+                relation_aggregates,
+            ).await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "MatchStage",
+                query.clone(),
+                relation_aggregates,
+            ).await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
-    pub(crate) async fn _execute_for_stream<'a, C>(
+    pub(crate) async fn _execute_for_rows<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_stage_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
         let query = authorize_query(apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let chunks = repository.fetch_stream(&query)
-            .await?;
-        Ok(chunks)
+        ))?;
+        context.fetch_compact_smart_list("MatchStage", &query).await
+    }
+
+    pub(crate) async fn _execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<TeaqlEntityStream<'a, R, RuntimeError>, RuntimeError>
+    where
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
+    {
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))?;
+        Ok(context.fetch_entity_stream("MatchStage", query))
     }
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
 
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self.page_offset(offset, limit)._execute_for_list(context).await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<u64, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<u64, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_stage_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query = apply_runtime_metadata(
+            self.query,
+            &query_options,
+            &self.child_enhancements,
+        );
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
         query.slice = None;
         query.relations.clear();
         query = query.count(COUNT_ALIAS);
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("MatchStage", &query).await?;
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for MatchStage is missing or not numeric"))))
+            .ok_or_else(|| RuntimeError::Graph(format!("count result for MatchStage is missing or not numeric")))
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_stage_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query.limit(1);
-        query.relations.clear();
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
-        Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .match_stage_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
+        let mut query = apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::MatchStageRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
+        ).limit(1);
+        query.relations.clear();
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("MatchStage", &query).await?;
+        Ok(!rows.is_empty())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -527,6 +521,17 @@ impl<R> MatchStageRequest<R> {
         self
     }
 
+    pub fn stream(mut self, chunk_size: usize) -> Self {
+        assert!(chunk_size > 0, "stream chunk size must be positive");
+        self.query = self.query.stream(chunk_size);
+        self
+    }
+
+    pub fn stream_default(mut self) -> Self {
+        self.query = self.query.stream_default();
+        self
+    }
+
     pub fn skip(mut self, offset: u64) -> Self {
         self.query = self.query.offset(offset);
         self
@@ -542,6 +547,47 @@ impl<R> MatchStageRequest<R> {
 
     pub fn page_offset(mut self, offset: u64, limit: u64) -> Self {
         self.query = self.query.page(offset, limit);
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch(mut self) -> Self {
+        self.query = self.query.optimize_for_continuous_page_fetch();
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch_with(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -611,6 +657,14 @@ impl<R> MatchStageRequest<R> {
     pub fn group_by(mut self, field: impl Into<String>) -> Self {
         self.query = self.query.group_by(field);
         self
+    }
+
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
     }
 
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
@@ -1457,10 +1511,6 @@ impl<R> MatchStageRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn id_is_value_1001(self) -> Self {
-        self.with_id_is("1001")
-    }
-
     pub fn with_id_is_value_1001(self) -> Self {
         self.with_id_is("1001")
     }
@@ -1471,10 +1521,6 @@ impl<R> MatchStageRequest<R> {
         self.with_id_is_not("1001")
     }
 
-
-    pub fn id_is_value_1002(self) -> Self {
-        self.with_id_is("1002")
-    }
 
     pub fn with_id_is_value_1002(self) -> Self {
         self.with_id_is("1002")
@@ -1487,10 +1533,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn id_is_value_1003(self) -> Self {
-        self.with_id_is("1003")
-    }
-
     pub fn with_id_is_value_1003(self) -> Self {
         self.with_id_is("1003")
     }
@@ -1501,10 +1543,6 @@ impl<R> MatchStageRequest<R> {
         self.with_id_is_not("1003")
     }
 
-
-    pub fn id_is_value_1004(self) -> Self {
-        self.with_id_is("1004")
-    }
 
     pub fn with_id_is_value_1004(self) -> Self {
         self.with_id_is("1004")
@@ -1517,10 +1555,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn id_is_value_1005(self) -> Self {
-        self.with_id_is("1005")
-    }
-
     pub fn with_id_is_value_1005(self) -> Self {
         self.with_id_is("1005")
     }
@@ -1532,10 +1566,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn id_is_value_1006(self) -> Self {
-        self.with_id_is("1006")
-    }
-
     pub fn with_id_is_value_1006(self) -> Self {
         self.with_id_is("1006")
     }
@@ -1546,10 +1576,6 @@ impl<R> MatchStageRequest<R> {
         self.with_id_is_not("1006")
     }
 
-
-    pub fn id_is_value_1007(self) -> Self {
-        self.with_id_is("1007")
-    }
 
     pub fn with_id_is_value_1007(self) -> Self {
         self.with_id_is("1007")
@@ -1563,10 +1589,6 @@ impl<R> MatchStageRequest<R> {
 
 
 
-    pub fn name_is_group(self) -> Self {
-        self.with_name_is("Group")
-    }
-
     pub fn with_name_is_group(self) -> Self {
         self.with_name_is("Group")
     }
@@ -1577,10 +1599,6 @@ impl<R> MatchStageRequest<R> {
         self.with_name_is_not("Group")
     }
 
-
-    pub fn name_is_round_of_32(self) -> Self {
-        self.with_name_is("Round of 32")
-    }
 
     pub fn with_name_is_round_of_32(self) -> Self {
         self.with_name_is("Round of 32")
@@ -1593,10 +1611,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn name_is_round_of_16(self) -> Self {
-        self.with_name_is("Round of 16")
-    }
-
     pub fn with_name_is_round_of_16(self) -> Self {
         self.with_name_is("Round of 16")
     }
@@ -1607,10 +1621,6 @@ impl<R> MatchStageRequest<R> {
         self.with_name_is_not("Round of 16")
     }
 
-
-    pub fn name_is_quarter_final(self) -> Self {
-        self.with_name_is("Quarter Final")
-    }
 
     pub fn with_name_is_quarter_final(self) -> Self {
         self.with_name_is("Quarter Final")
@@ -1623,10 +1633,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn name_is_semi_final(self) -> Self {
-        self.with_name_is("Semi Final")
-    }
-
     pub fn with_name_is_semi_final(self) -> Self {
         self.with_name_is("Semi Final")
     }
@@ -1638,10 +1644,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn name_is_third_place(self) -> Self {
-        self.with_name_is("Third Place")
-    }
-
     pub fn with_name_is_third_place(self) -> Self {
         self.with_name_is("Third Place")
     }
@@ -1652,10 +1654,6 @@ impl<R> MatchStageRequest<R> {
         self.with_name_is_not("Third Place")
     }
 
-
-    pub fn name_is_final(self) -> Self {
-        self.with_name_is("Final")
-    }
 
     pub fn with_name_is_final(self) -> Self {
         self.with_name_is("Final")
@@ -1669,10 +1667,6 @@ impl<R> MatchStageRequest<R> {
 
 
 
-    pub fn code_is_grou_p(self) -> Self {
-        self.with_code_is("GROUP")
-    }
-
     pub fn with_code_is_grou_p(self) -> Self {
         self.with_code_is("GROUP")
     }
@@ -1683,10 +1677,6 @@ impl<R> MatchStageRequest<R> {
         self.with_code_is_not("GROUP")
     }
 
-
-    pub fn code_is_round_of_32(self) -> Self {
-        self.with_code_is("ROUND_OF_32")
-    }
 
     pub fn with_code_is_round_of_32(self) -> Self {
         self.with_code_is("ROUND_OF_32")
@@ -1699,10 +1689,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn code_is_round_of_16(self) -> Self {
-        self.with_code_is("ROUND_OF_16")
-    }
-
     pub fn with_code_is_round_of_16(self) -> Self {
         self.with_code_is("ROUND_OF_16")
     }
@@ -1713,10 +1699,6 @@ impl<R> MatchStageRequest<R> {
         self.with_code_is_not("ROUND_OF_16")
     }
 
-
-    pub fn code_is_quarter_fina_l(self) -> Self {
-        self.with_code_is("QUARTER_FINAL")
-    }
 
     pub fn with_code_is_quarter_fina_l(self) -> Self {
         self.with_code_is("QUARTER_FINAL")
@@ -1729,10 +1711,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn code_is_semi_fina_l(self) -> Self {
-        self.with_code_is("SEMI_FINAL")
-    }
-
     pub fn with_code_is_semi_fina_l(self) -> Self {
         self.with_code_is("SEMI_FINAL")
     }
@@ -1744,10 +1722,6 @@ impl<R> MatchStageRequest<R> {
     }
 
 
-    pub fn code_is_third_plac_e(self) -> Self {
-        self.with_code_is("THIRD_PLACE")
-    }
-
     pub fn with_code_is_third_plac_e(self) -> Self {
         self.with_code_is("THIRD_PLACE")
     }
@@ -1758,10 +1732,6 @@ impl<R> MatchStageRequest<R> {
         self.with_code_is_not("THIRD_PLACE")
     }
 
-
-    pub fn code_is_fina_l(self) -> Self {
-        self.with_code_is("FINAL")
-    }
 
     pub fn with_code_is_fina_l(self) -> Self {
         self.with_code_is("FINAL")
@@ -1889,8 +1859,7 @@ impl<R> MatchStageRequest<R> {
 
     pub fn select_tournament_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament", selection));
+        self.query = self.query.relation_query("tournament", selection.into_query());
         self
 }
 
@@ -1913,11 +1882,11 @@ impl<R> MatchStageRequest<R> {
         self
     }
     pub fn have_tournament_matches(self) -> Self {
-        self.with_tournament_match_list_matching(SelectQuery::new("TournamentMatch"))
+        self.with_tournament_match_list_matching(crate::Q::tournament_matches_minimal())
     }
 
     pub fn have_no_tournament_matches(self) -> Self {
-        self.without_tournament_match_list_matching(SelectQuery::new("TournamentMatch"))
+        self.without_tournament_match_list_matching(crate::Q::tournament_matches_minimal())
     }
 
     pub fn with_tournament_match_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -1951,8 +1920,7 @@ impl<R> MatchStageRequest<R> {
 
     pub fn select_tournament_match_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament_match_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament_match_list", selection));
+        self.query = self.query.relation_query("tournament_match_list", selection.into_query());
         self
 }
     pub fn count_tournament_matches(self) -> Self {
@@ -1989,6 +1957,17 @@ impl<R> MatchStageRequest<R> {
         self
     }
 
+    fn scalar_from_tournament_matches_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query_options.relation_aggregates.push(RelationAggregate::new(
+            "tournament_match_list",
+            alias,
+            selection,
+            true,
+        ));
+        self
+    }
+
     pub fn group_by_tournament_matches_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_tournament_matches(request)
     }
@@ -1999,434 +1978,434 @@ impl<R> MatchStageRequest<R> {
     }
 
     pub fn sum_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("match_number", "sum_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("match_number", "sum_match_number"))
     }
     pub fn min_match_number_of_tournament_matches(self) -> Self {
         self.min_match_number_of_tournament_matches_as("min_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("match_number", "min_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("match_number", "min_match_number"))
     }
     pub fn max_match_number_of_tournament_matches(self) -> Self {
         self.max_match_number_of_tournament_matches_as("max_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("match_number", "max_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("match_number", "max_match_number"))
     }
     pub fn avg_match_number_of_tournament_matches(self) -> Self {
         self.avg_match_number_of_tournament_matches_as("avg_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("match_number", "avg_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("match_number", "avg_match_number"))
     }
     pub fn standard_deviation_match_number_of_tournament_matches(self) -> Self {
         self.standard_deviation_match_number_of_tournament_matches_as("standard_deviation_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("match_number", "stdDev_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("match_number", "stdDev_match_number"))
     }
     pub fn square_root_of_population_standard_deviation_match_number_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_match_number_of_tournament_matches_as("square_root_of_population_standard_deviation_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("match_number", "stdDevPop_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("match_number", "stdDevPop_match_number"))
     }
     pub fn sample_variance_match_number_of_tournament_matches(self) -> Self {
         self.sample_variance_match_number_of_tournament_matches_as("sample_variance_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("match_number", "varSamp_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("match_number", "varSamp_match_number"))
     }
     pub fn sample_population_variance_match_number_of_tournament_matches(self) -> Self {
         self.sample_population_variance_match_number_of_tournament_matches_as("sample_population_variance_match_number_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_match_number_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("match_number", "varPop_match_number"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("match_number", "varPop_match_number"))
     }
     pub fn min_match_date_of_tournament_matches(self) -> Self {
         self.min_match_date_of_tournament_matches_as("min_match_date_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_match_date_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("match_date", "min_match_date"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("match_date", "min_match_date"))
     }
     pub fn max_match_date_of_tournament_matches(self) -> Self {
         self.max_match_date_of_tournament_matches_as("max_match_date_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_match_date_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("match_date", "max_match_date"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("match_date", "max_match_date"))
     }
     pub fn sum_home_score_of_tournament_matches(self) -> Self {
         self.sum_home_score_of_tournament_matches_as("sum_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("home_score", "sum_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("home_score", "sum_home_score"))
     }
     pub fn min_home_score_of_tournament_matches(self) -> Self {
         self.min_home_score_of_tournament_matches_as("min_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("home_score", "min_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("home_score", "min_home_score"))
     }
     pub fn max_home_score_of_tournament_matches(self) -> Self {
         self.max_home_score_of_tournament_matches_as("max_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("home_score", "max_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("home_score", "max_home_score"))
     }
     pub fn avg_home_score_of_tournament_matches(self) -> Self {
         self.avg_home_score_of_tournament_matches_as("avg_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("home_score", "avg_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("home_score", "avg_home_score"))
     }
     pub fn standard_deviation_home_score_of_tournament_matches(self) -> Self {
         self.standard_deviation_home_score_of_tournament_matches_as("standard_deviation_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("home_score", "stdDev_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("home_score", "stdDev_home_score"))
     }
     pub fn square_root_of_population_standard_deviation_home_score_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_home_score_of_tournament_matches_as("square_root_of_population_standard_deviation_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("home_score", "stdDevPop_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("home_score", "stdDevPop_home_score"))
     }
     pub fn sample_variance_home_score_of_tournament_matches(self) -> Self {
         self.sample_variance_home_score_of_tournament_matches_as("sample_variance_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("home_score", "varSamp_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("home_score", "varSamp_home_score"))
     }
     pub fn sample_population_variance_home_score_of_tournament_matches(self) -> Self {
         self.sample_population_variance_home_score_of_tournament_matches_as("sample_population_variance_home_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_home_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("home_score", "varPop_home_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("home_score", "varPop_home_score"))
     }
     pub fn sum_away_score_of_tournament_matches(self) -> Self {
         self.sum_away_score_of_tournament_matches_as("sum_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("away_score", "sum_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("away_score", "sum_away_score"))
     }
     pub fn min_away_score_of_tournament_matches(self) -> Self {
         self.min_away_score_of_tournament_matches_as("min_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("away_score", "min_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("away_score", "min_away_score"))
     }
     pub fn max_away_score_of_tournament_matches(self) -> Self {
         self.max_away_score_of_tournament_matches_as("max_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("away_score", "max_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("away_score", "max_away_score"))
     }
     pub fn avg_away_score_of_tournament_matches(self) -> Self {
         self.avg_away_score_of_tournament_matches_as("avg_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("away_score", "avg_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("away_score", "avg_away_score"))
     }
     pub fn standard_deviation_away_score_of_tournament_matches(self) -> Self {
         self.standard_deviation_away_score_of_tournament_matches_as("standard_deviation_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("away_score", "stdDev_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("away_score", "stdDev_away_score"))
     }
     pub fn square_root_of_population_standard_deviation_away_score_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_away_score_of_tournament_matches_as("square_root_of_population_standard_deviation_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("away_score", "stdDevPop_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("away_score", "stdDevPop_away_score"))
     }
     pub fn sample_variance_away_score_of_tournament_matches(self) -> Self {
         self.sample_variance_away_score_of_tournament_matches_as("sample_variance_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("away_score", "varSamp_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("away_score", "varSamp_away_score"))
     }
     pub fn sample_population_variance_away_score_of_tournament_matches(self) -> Self {
         self.sample_population_variance_away_score_of_tournament_matches_as("sample_population_variance_away_score_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_away_score_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("away_score", "varPop_away_score"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("away_score", "varPop_away_score"))
     }
     pub fn sum_extra_time_home_of_tournament_matches(self) -> Self {
         self.sum_extra_time_home_of_tournament_matches_as("sum_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("extra_time_home", "sum_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("extra_time_home", "sum_extra_time_home"))
     }
     pub fn min_extra_time_home_of_tournament_matches(self) -> Self {
         self.min_extra_time_home_of_tournament_matches_as("min_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("extra_time_home", "min_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("extra_time_home", "min_extra_time_home"))
     }
     pub fn max_extra_time_home_of_tournament_matches(self) -> Self {
         self.max_extra_time_home_of_tournament_matches_as("max_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("extra_time_home", "max_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("extra_time_home", "max_extra_time_home"))
     }
     pub fn avg_extra_time_home_of_tournament_matches(self) -> Self {
         self.avg_extra_time_home_of_tournament_matches_as("avg_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("extra_time_home", "avg_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("extra_time_home", "avg_extra_time_home"))
     }
     pub fn standard_deviation_extra_time_home_of_tournament_matches(self) -> Self {
         self.standard_deviation_extra_time_home_of_tournament_matches_as("standard_deviation_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("extra_time_home", "stdDev_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("extra_time_home", "stdDev_extra_time_home"))
     }
     pub fn square_root_of_population_standard_deviation_extra_time_home_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_extra_time_home_of_tournament_matches_as("square_root_of_population_standard_deviation_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("extra_time_home", "stdDevPop_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("extra_time_home", "stdDevPop_extra_time_home"))
     }
     pub fn sample_variance_extra_time_home_of_tournament_matches(self) -> Self {
         self.sample_variance_extra_time_home_of_tournament_matches_as("sample_variance_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("extra_time_home", "varSamp_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("extra_time_home", "varSamp_extra_time_home"))
     }
     pub fn sample_population_variance_extra_time_home_of_tournament_matches(self) -> Self {
         self.sample_population_variance_extra_time_home_of_tournament_matches_as("sample_population_variance_extra_time_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_extra_time_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("extra_time_home", "varPop_extra_time_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("extra_time_home", "varPop_extra_time_home"))
     }
     pub fn sum_extra_time_away_of_tournament_matches(self) -> Self {
         self.sum_extra_time_away_of_tournament_matches_as("sum_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("extra_time_away", "sum_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("extra_time_away", "sum_extra_time_away"))
     }
     pub fn min_extra_time_away_of_tournament_matches(self) -> Self {
         self.min_extra_time_away_of_tournament_matches_as("min_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("extra_time_away", "min_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("extra_time_away", "min_extra_time_away"))
     }
     pub fn max_extra_time_away_of_tournament_matches(self) -> Self {
         self.max_extra_time_away_of_tournament_matches_as("max_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("extra_time_away", "max_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("extra_time_away", "max_extra_time_away"))
     }
     pub fn avg_extra_time_away_of_tournament_matches(self) -> Self {
         self.avg_extra_time_away_of_tournament_matches_as("avg_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("extra_time_away", "avg_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("extra_time_away", "avg_extra_time_away"))
     }
     pub fn standard_deviation_extra_time_away_of_tournament_matches(self) -> Self {
         self.standard_deviation_extra_time_away_of_tournament_matches_as("standard_deviation_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("extra_time_away", "stdDev_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("extra_time_away", "stdDev_extra_time_away"))
     }
     pub fn square_root_of_population_standard_deviation_extra_time_away_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_extra_time_away_of_tournament_matches_as("square_root_of_population_standard_deviation_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("extra_time_away", "stdDevPop_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("extra_time_away", "stdDevPop_extra_time_away"))
     }
     pub fn sample_variance_extra_time_away_of_tournament_matches(self) -> Self {
         self.sample_variance_extra_time_away_of_tournament_matches_as("sample_variance_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("extra_time_away", "varSamp_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("extra_time_away", "varSamp_extra_time_away"))
     }
     pub fn sample_population_variance_extra_time_away_of_tournament_matches(self) -> Self {
         self.sample_population_variance_extra_time_away_of_tournament_matches_as("sample_population_variance_extra_time_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_extra_time_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("extra_time_away", "varPop_extra_time_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("extra_time_away", "varPop_extra_time_away"))
     }
     pub fn sum_penalty_home_of_tournament_matches(self) -> Self {
         self.sum_penalty_home_of_tournament_matches_as("sum_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("penalty_home", "sum_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("penalty_home", "sum_penalty_home"))
     }
     pub fn min_penalty_home_of_tournament_matches(self) -> Self {
         self.min_penalty_home_of_tournament_matches_as("min_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("penalty_home", "min_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("penalty_home", "min_penalty_home"))
     }
     pub fn max_penalty_home_of_tournament_matches(self) -> Self {
         self.max_penalty_home_of_tournament_matches_as("max_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("penalty_home", "max_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("penalty_home", "max_penalty_home"))
     }
     pub fn avg_penalty_home_of_tournament_matches(self) -> Self {
         self.avg_penalty_home_of_tournament_matches_as("avg_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("penalty_home", "avg_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("penalty_home", "avg_penalty_home"))
     }
     pub fn standard_deviation_penalty_home_of_tournament_matches(self) -> Self {
         self.standard_deviation_penalty_home_of_tournament_matches_as("standard_deviation_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("penalty_home", "stdDev_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("penalty_home", "stdDev_penalty_home"))
     }
     pub fn square_root_of_population_standard_deviation_penalty_home_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_penalty_home_of_tournament_matches_as("square_root_of_population_standard_deviation_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("penalty_home", "stdDevPop_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("penalty_home", "stdDevPop_penalty_home"))
     }
     pub fn sample_variance_penalty_home_of_tournament_matches(self) -> Self {
         self.sample_variance_penalty_home_of_tournament_matches_as("sample_variance_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("penalty_home", "varSamp_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("penalty_home", "varSamp_penalty_home"))
     }
     pub fn sample_population_variance_penalty_home_of_tournament_matches(self) -> Self {
         self.sample_population_variance_penalty_home_of_tournament_matches_as("sample_population_variance_penalty_home_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_penalty_home_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("penalty_home", "varPop_penalty_home"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("penalty_home", "varPop_penalty_home"))
     }
     pub fn sum_penalty_away_of_tournament_matches(self) -> Self {
         self.sum_penalty_away_of_tournament_matches_as("sum_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sum_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().sum("penalty_away", "sum_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().sum("penalty_away", "sum_penalty_away"))
     }
     pub fn min_penalty_away_of_tournament_matches(self) -> Self {
         self.min_penalty_away_of_tournament_matches_as("min_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("penalty_away", "min_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("penalty_away", "min_penalty_away"))
     }
     pub fn max_penalty_away_of_tournament_matches(self) -> Self {
         self.max_penalty_away_of_tournament_matches_as("max_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("penalty_away", "max_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("penalty_away", "max_penalty_away"))
     }
     pub fn avg_penalty_away_of_tournament_matches(self) -> Self {
         self.avg_penalty_away_of_tournament_matches_as("avg_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn avg_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().avg("penalty_away", "avg_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().avg("penalty_away", "avg_penalty_away"))
     }
     pub fn standard_deviation_penalty_away_of_tournament_matches(self) -> Self {
         self.standard_deviation_penalty_away_of_tournament_matches_as("standard_deviation_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn standard_deviation_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev("penalty_away", "stdDev_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev("penalty_away", "stdDev_penalty_away"))
     }
     pub fn square_root_of_population_standard_deviation_penalty_away_of_tournament_matches(self) -> Self {
         self.square_root_of_population_standard_deviation_penalty_away_of_tournament_matches_as("square_root_of_population_standard_deviation_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("penalty_away", "stdDevPop_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().stddev_pop("penalty_away", "stdDevPop_penalty_away"))
     }
     pub fn sample_variance_penalty_away_of_tournament_matches(self) -> Self {
         self.sample_variance_penalty_away_of_tournament_matches_as("sample_variance_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_variance_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_samp("penalty_away", "varSamp_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_samp("penalty_away", "varSamp_penalty_away"))
     }
     pub fn sample_population_variance_penalty_away_of_tournament_matches(self) -> Self {
         self.sample_population_variance_penalty_away_of_tournament_matches_as("sample_population_variance_penalty_away_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn sample_population_variance_penalty_away_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().var_pop("penalty_away", "varPop_penalty_away"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().var_pop("penalty_away", "varPop_penalty_away"))
     }
     pub fn min_create_time_of_tournament_matches(self) -> Self {
         self.min_create_time_of_tournament_matches_as("min_create_time_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_create_time_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("create_time", "min_create_time"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("create_time", "min_create_time"))
     }
     pub fn max_create_time_of_tournament_matches(self) -> Self {
         self.max_create_time_of_tournament_matches_as("max_create_time_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_create_time_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("create_time", "max_create_time"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("create_time", "max_create_time"))
     }
     pub fn min_update_time_of_tournament_matches(self) -> Self {
         self.min_update_time_of_tournament_matches_as("min_update_time_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn min_update_time_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().min("update_time", "min_update_time"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().min("update_time", "min_update_time"))
     }
     pub fn max_update_time_of_tournament_matches(self) -> Self {
         self.max_update_time_of_tournament_matches_as("max_update_time_of_tournament_matches", crate::Q::tournament_matches().unlimited())
     }
 
     pub fn max_update_time_of_tournament_matches_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_tournament_matches_as(alias, request.into().into_query().max("update_time", "max_update_time"))
+        self.scalar_from_tournament_matches_as(alias, request.into().into_query().max("update_time", "max_update_time"))
     }
 }
 
@@ -2456,28 +2435,40 @@ impl<R> From< MatchStageRequest<R> > for QuerySelection {
 
 
 impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::MatchStage> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+where C: crate::TeaqlRuntime + ?Sized + 'a
 {
-    type Error = crate::TeaqlDataServiceError<C::MatchStageRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Error = teaql_runtime::RuntimeError;
+    type Entity = crate::MatchStage;
+    fn save(self, context: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + Send + '_>> {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
-                .await
-                .map_err(DataServiceError::Runtime)
+            context.save_audited_entity(self).await
         })
     }
 }
 
 impl<R: teaql_core::Entity> crate::PurposedQuery<MatchStageRequest<R>> {
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::MatchStage
+    pub fn comment(mut self, comment: impl Into<String>) -> Self {
+        self.inner.query_options.comment = Some(comment.into());
+        self
+    }
+
+    pub fn new_entity<C>(&self, context: &C) -> crate::MatchStage
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        crate::MatchStage::runtime_new(ctx.user_context().entity_root())
+        self.require_comment();
+        let mut entity = crate::MatchStage::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context.user_context().next_id(crate::MatchStage::ENTITY_NAME) {
+            entity.update_id(id);
+        }
+        teaql_core::Entity::mark_as_new(&mut entity);
+        entity
     }
 
     fn into_inner_with_trace(mut self) -> MatchStageRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
+        self.require_comment();
+        self.inner.query.trace_chain.push(teaql_core::TraceNode::typed(
+            teaql_core::TraceKind::Purpose,
             self.inner.query.entity.clone(),
             None,
             self.purpose,
@@ -2485,78 +2476,86 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<MatchStageRequest<R>> {
         self.inner
     }
 
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
+    }
+
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    ) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()._execute_for_page(context, offset, limit).await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()._execute_for_exists(context).await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()._execute_for_list(context).await
     }
 
-    /// Execute query in streaming mode (chunked).
-    /// Returns a Vec of StreamChunk, each containing up to chunk_size rows.
+    pub async fn execute_for_rows<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<teaql_core::CompactRow>, teaql_runtime::RuntimeError>
+    where
+        C: crate::TeaqlRuntime + ?Sized,
+    {
+        self.into_inner_with_trace()._execute_for_rows(context).await
+    }
+
+    /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(self, context: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, teaql_runtime::RuntimeError>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()._execute_for_stream(context).await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()._execute_for_first(context).await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
 
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(self, context: &'a C) -> Result<u64, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::MatchStageRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()._execute_for_count(context).await
     }
 }

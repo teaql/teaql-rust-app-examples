@@ -9,7 +9,9 @@ pub struct PurposedQuery<T> {
 
 impl<T> PurposedQuery<T> {
     pub fn new(inner: T, purpose: impl Into<String>) -> Self {
-        Self { inner, purpose: purpose.into() }
+        let purpose = purpose.into();
+        assert!(!purpose.trim().is_empty(), "query purpose must not be empty");
+        Self { inner, purpose }
     }
 }
 
@@ -34,6 +36,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn system_statuses() -> SystemStatusRequest {
         SystemStatusRequest::new()
             .select_self()
@@ -51,6 +55,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn device_settings() -> DeviceSettingRequest {
         DeviceSettingRequest::new()
@@ -70,6 +76,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn sample_records() -> SampleRecordRequest {
         SampleRecordRequest::new()
             .select_self()
@@ -87,4 +95,6 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 }

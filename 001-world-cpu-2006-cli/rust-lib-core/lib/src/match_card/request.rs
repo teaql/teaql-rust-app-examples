@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
-use teaql_runtime::{DataServiceError, RuntimeError};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
+use teaql_runtime::RuntimeError;
 
 use crate::request_support::*;
 
@@ -98,171 +98,165 @@ impl<R> MatchCardRequest<R> {
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let repository = ctx
-            .match_card_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = authorize_query(apply_runtime_metadata(
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "MatchCard",
+                query,
+                relation_aggregates,
+            ).await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "MatchCard",
+                query.clone(),
+                relation_aggregates,
+            ).await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
-    pub(crate) async fn _execute_for_stream<'a, C>(
+    pub(crate) async fn _execute_for_rows<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_card_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
         let query = authorize_query(apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let chunks = repository.fetch_stream(&query)
-            .await?;
-        Ok(chunks)
+        ))?;
+        context.fetch_compact_smart_list("MatchCard", &query).await
+    }
+
+    pub(crate) async fn _execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<TeaqlEntityStream<'a, R, RuntimeError>, RuntimeError>
+    where
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
+    {
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))?;
+        Ok(context.fetch_entity_stream("MatchCard", query))
     }
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
 
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self.page_offset(offset, limit)._execute_for_list(context).await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<u64, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<u64, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_card_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query = apply_runtime_metadata(
+            self.query,
+            &query_options,
+            &self.child_enhancements,
+        );
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
         query.slice = None;
         query.relations.clear();
         query = query.count(COUNT_ALIAS);
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("MatchCard", &query).await?;
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for MatchCard is missing or not numeric"))))
+            .ok_or_else(|| RuntimeError::Graph(format!("count result for MatchCard is missing or not numeric")))
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .match_card_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query.limit(1);
-        query.relations.clear();
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
-        Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .match_card_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
+        let mut query = apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::MatchCardRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
+        ).limit(1);
+        query.relations.clear();
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("MatchCard", &query).await?;
+        Ok(!rows.is_empty())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -544,6 +538,17 @@ impl<R> MatchCardRequest<R> {
         self
     }
 
+    pub fn stream(mut self, chunk_size: usize) -> Self {
+        assert!(chunk_size > 0, "stream chunk size must be positive");
+        self.query = self.query.stream(chunk_size);
+        self
+    }
+
+    pub fn stream_default(mut self) -> Self {
+        self.query = self.query.stream_default();
+        self
+    }
+
     pub fn skip(mut self, offset: u64) -> Self {
         self.query = self.query.offset(offset);
         self
@@ -559,6 +564,47 @@ impl<R> MatchCardRequest<R> {
 
     pub fn page_offset(mut self, offset: u64, limit: u64) -> Self {
         self.query = self.query.page(offset, limit);
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch(mut self) -> Self {
+        self.query = self.query.optimize_for_continuous_page_fetch();
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch_with(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -634,6 +680,14 @@ impl<R> MatchCardRequest<R> {
     pub fn group_by(mut self, field: impl Into<String>) -> Self {
         self.query = self.query.group_by(field);
         self
+    }
+
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
     }
 
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
@@ -2187,7 +2241,7 @@ impl<R> MatchCardRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::card_categories_minimal().filter(...);
     /// let request = crate::Q::match_cards().with_card_category_matching(dynamic_query);
@@ -2217,7 +2271,7 @@ impl<R> MatchCardRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::card_categories_minimal().filter(...);
     /// let request = crate::Q::match_cards().without_card_category_matching(dynamic_query);
@@ -2418,10 +2472,6 @@ impl<R> MatchCardRequest<R> {
         self.query.relations.retain(|relation| relation.name != "tournament");
         self
     }
-    pub fn card_category_is_yellow(self) -> Self {
-        self.filter_by_card_category(1001_u64)
-    }
-
     pub fn with_card_category_is_yellow(self) -> Self {
         self.filter_by_card_category(1001_u64)
     }
@@ -2434,10 +2484,6 @@ impl<R> MatchCardRequest<R> {
     }
 
 
-    pub fn card_category_is_red(self) -> Self {
-        self.filter_by_card_category(1002_u64)
-    }
-
     pub fn with_card_category_is_red(self) -> Self {
         self.filter_by_card_category(1002_u64)
     }
@@ -2449,10 +2495,6 @@ impl<R> MatchCardRequest<R> {
         self
     }
 
-
-    pub fn card_category_is_second_yellow(self) -> Self {
-        self.filter_by_card_category(1003_u64)
-    }
 
     pub fn with_card_category_is_second_yellow(self) -> Self {
         self.filter_by_card_category(1003_u64)
@@ -2475,8 +2517,7 @@ impl<R> MatchCardRequest<R> {
 
     pub fn select_tournament_match_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament_match", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament_match", selection));
+        self.query = self.query.relation_query("tournament_match", selection.into_query());
         self
 }
 
@@ -2506,8 +2547,7 @@ impl<R> MatchCardRequest<R> {
 
     pub fn select_tournament_team_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament_team", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament_team", selection));
+        self.query = self.query.relation_query("tournament_team", selection.into_query());
         self
 }
 
@@ -2537,8 +2577,7 @@ impl<R> MatchCardRequest<R> {
 
     pub fn select_card_category_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("card_category", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("card_category", selection));
+        self.query = self.query.relation_query("card_category", selection.into_query());
         self
 }
 
@@ -2568,8 +2607,7 @@ impl<R> MatchCardRequest<R> {
 
     pub fn select_tournament_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament", selection));
+        self.query = self.query.relation_query("tournament", selection.into_query());
         self
 }
 
@@ -2619,28 +2657,40 @@ impl<R> From< MatchCardRequest<R> > for QuerySelection {
 
 
 impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::MatchCard> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+where C: crate::TeaqlRuntime + ?Sized + 'a
 {
-    type Error = crate::TeaqlDataServiceError<C::MatchCardRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Error = teaql_runtime::RuntimeError;
+    type Entity = crate::MatchCard;
+    fn save(self, context: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + Send + '_>> {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
-                .await
-                .map_err(DataServiceError::Runtime)
+            context.save_audited_entity(self).await
         })
     }
 }
 
 impl<R: teaql_core::Entity> crate::PurposedQuery<MatchCardRequest<R>> {
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::MatchCard
+    pub fn comment(mut self, comment: impl Into<String>) -> Self {
+        self.inner.query_options.comment = Some(comment.into());
+        self
+    }
+
+    pub fn new_entity<C>(&self, context: &C) -> crate::MatchCard
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        crate::MatchCard::runtime_new(ctx.user_context().entity_root())
+        self.require_comment();
+        let mut entity = crate::MatchCard::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context.user_context().next_id(crate::MatchCard::ENTITY_NAME) {
+            entity.update_id(id);
+        }
+        teaql_core::Entity::mark_as_new(&mut entity);
+        entity
     }
 
     fn into_inner_with_trace(mut self) -> MatchCardRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
+        self.require_comment();
+        self.inner.query.trace_chain.push(teaql_core::TraceNode::typed(
+            teaql_core::TraceKind::Purpose,
             self.inner.query.entity.clone(),
             None,
             self.purpose,
@@ -2648,78 +2698,86 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<MatchCardRequest<R>> {
         self.inner
     }
 
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
+    }
+
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    ) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()._execute_for_page(context, offset, limit).await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()._execute_for_exists(context).await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()._execute_for_list(context).await
     }
 
-    /// Execute query in streaming mode (chunked).
-    /// Returns a Vec of StreamChunk, each containing up to chunk_size rows.
+    pub async fn execute_for_rows<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<teaql_core::CompactRow>, teaql_runtime::RuntimeError>
+    where
+        C: crate::TeaqlRuntime + ?Sized,
+    {
+        self.into_inner_with_trace()._execute_for_rows(context).await
+    }
+
+    /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(self, context: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, teaql_runtime::RuntimeError>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()._execute_for_stream(context).await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()._execute_for_first(context).await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
 
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(self, context: &'a C) -> Result<u64, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::MatchCardRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()._execute_for_count(context).await
     }
 }

@@ -1,9 +1,10 @@
+
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait SampleRecordCheckerLogic: Send + Sync {
     fn check_and_fix_sample_record(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::SampleRecord,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -115,13 +116,194 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::SampleRecord,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_create() {
+            entity.update_sample_time(context.fix_time());
+            context.record_fix_evidence(teaql_runtime::FixEvidence::new("SampleRecord", "sample_time", teaql_runtime::FixEvidenceSource::Clock, "graphClock"));
+        }
+
+
+
+
+
+
+
+
+
+
+
+        if status.is_create() {
+            entity.update_create_time(context.fix_time());
+            context.record_fix_evidence(teaql_runtime::FixEvidence::new("SampleRecord", "create_time", teaql_runtime::FixEvidenceSource::Clock, "graphClock"));
+        }
+
+
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("device_system_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("device_system"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("system_status_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("system_status"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("sample_time") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("sample_time"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("gas") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("gas"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("lref") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("lref"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity1") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity1"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity2") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity2"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity3") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity3"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity4") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity4"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity5") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity5"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity6") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity6"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity7") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity7"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("impurity8") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("impurity8"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("create_time") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("create_time"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
         self.logic
-            .check_and_fix_sample_record(ctx, entity, status, location, results);
+            .check_and_fix_sample_record(context, entity, status, location, results);
     }
 }

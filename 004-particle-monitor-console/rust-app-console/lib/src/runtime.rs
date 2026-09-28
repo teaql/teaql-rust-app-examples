@@ -1,3 +1,4 @@
+
 use crate::*;
 use teaql_core::TeaqlEntity;
 
@@ -122,8 +123,8 @@ impl teaql_data_service::QueryExecutor for ServiceRuntimeExecutor {
 }
 
 impl teaql_data_service::StreamQueryExecutor for ServiceRuntimeExecutor {
-    async fn query_stream(&self, request: teaql_data_service::QueryRequest, chunk_size: usize) -> Result<Vec<teaql_data_service::StreamChunk>, Self::Error> {
-        teaql_data_service::StreamQueryExecutor::query_stream(&self.inner, request, chunk_size).await
+    fn query_stream(&self, request: teaql_data_service::QueryRequest, chunk_size: usize) -> teaql_data_service::QueryStream<'_, Self::Error> {
+        teaql_data_service::StreamQueryExecutor::query_stream(&self.inner, request, chunk_size)
     }
 }
 
@@ -159,26 +160,9 @@ pub async fn service_runtime_from_pool(pool: DataServicePool) -> Result<ServiceR
     context.register_executor(executor.clone());
     context.insert_resource(executor);
 
-    // 自动加载 Zero-Code 审计配置与 Schema 模式
-    let env_config = teaql_tool_core::audit_config_from_env(&[
-        "device_system_data", "system_status_data", "device_setting_data", "sample_record_data"
-    ]);
-    let schema_mode = env_config.schema_mode;
-    context.insert_resource(env_config.config.clone());
-    context.insert_resource(env_config);
-
-    match schema_mode {
-        teaql_tool_core::SchemaMode::Execute => {
-            context.ensure_schema().await?;
-        }
-        teaql_tool_core::SchemaMode::DryRun => {
-            // DryRun: 目前等效于验证
-            context.ensure_schema().await?;
-        }
-        teaql_tool_core::SchemaMode::Verify => {
-            context.ensure_schema().await?;
-        }
-    }
+    // SQL logging is owned by teaql-runtime. The legacy teaql-tool-core
+    // environment whitelist rejects runtime logging variables and must not
+    // gate generated application startup. Schema remains explicit.
 
     Ok(context)
 }
@@ -222,166 +206,207 @@ pub fn checker_registry() -> teaql_runtime::InMemoryCheckerRegistry {
         .with_checker(teaql_runtime::TypedEntityChecker::<SampleRecord, _>::new(SampleRecordChecker::default()))
 }
 
+fn is_generated_bootstrap_retryable_conflict(error: &teaql_runtime::RuntimeError) -> bool {
+    if matches!(error, teaql_runtime::RuntimeError::OptimisticLockConflict { .. }) { return true }
+    let teaql_runtime::RuntimeError::Graph(message) = error else { return false };
+    (message.contains("UNIQUE constraint failed:") && message.contains("_data.id"))
+        || (message.contains("duplicate key value violates unique constraint") && message.contains("_data_pkey"))
+        || (message.contains("Duplicate entry") && message.contains("PRIMARY"))
+}
+
+fn ensure_generated_bootstrap<'a>(context: &'a teaql_runtime::UserContext) -> teaql_runtime::GeneratedSchemaBootstrapFuture<'a> {
+    Box::pin(async move {
+        for attempt in 0..5 {
+            match ensure_generated_bootstrap_once(context).await {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt < 4 && is_generated_bootstrap_retryable_conflict(&error) => tokio::task::yield_now().await,
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("bootstrap attempts always return or fail")
+    })
+}
+
+async fn ensure_generated_bootstrap_once(context: &teaql_runtime::UserContext) -> Result<(), teaql_runtime::RuntimeError> {
+        use teaql_core::Entity as _;
+        let root_rows = crate::Q::device_systems().select_self_fields().with_id_is(1_u64).comment("what: locate generated Domain Root").purpose("why: idempotent runtime bootstrap").execute_for_list(context).await.map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        let domain_root = if let Some(entity) = root_rows.data.into_iter().next() { entity } else {
+            let mut entity = DeviceSystem::runtime_new(context.entity_runtime_state());
+            entity.update_id(1_u64);
+            context.initialize_generated_bootstrap_entity(&mut entity, DeviceSystem::ENTITY_NAME, 1_u64)?;
+            entity.update_name("PMS-GT660X Terminal");
+            entity.update_serial_number("PMS-2026-0701");
+            teaql_runtime::AuditedSaveExt::save(entity.audit_as("create generated Domain Root DeviceSystem"), context).await?
+        };
+        context.set_generated_bootstrap_active_root(DeviceSystem::ENTITY_NAME, domain_root.id())?;
+        let rows_constant_system_status_1001 = crate::Q::system_statuses().select_self_fields().with_id_is(1001_u64).comment("what: locate generated constant").purpose("why: idempotent runtime bootstrap").execute_for_list(context).await.map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_system_status_1001) = rows_constant_system_status_1001.data.into_iter().next() {
+            let mut changed = false;
+            if constant_system_status_1001.device_system_id() != 1_u64 { constant_system_status_1001.update_device_system_id(1_u64); changed = true; }
+            if constant_system_status_1001.name() != "Online" { constant_system_status_1001.update_name("Online"); changed = true; }
+            if constant_system_status_1001.code() != "ONLINE" { constant_system_status_1001.update_code("ONLINE"); changed = true; }
+            if changed { let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1001.audit_as("reconcile model constant SystemStatus(1001)"), context).await?; }
+        } else {
+            let mut constant_system_status_1001 = SystemStatus::runtime_new(context.entity_runtime_state());
+            constant_system_status_1001.update_id(1001_u64);
+            context.initialize_generated_bootstrap_entity(&mut constant_system_status_1001, SystemStatus::ENTITY_NAME, 1001_u64)?;
+            constant_system_status_1001.update_device_system_id(1_u64);
+            constant_system_status_1001.update_name("Online");
+            constant_system_status_1001.update_code("ONLINE");
+            let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1001.audit_as("create model constant SystemStatus(1001)"), context).await?;
+        }
+        let rows_constant_system_status_1002 = crate::Q::system_statuses().select_self_fields().with_id_is(1002_u64).comment("what: locate generated constant").purpose("why: idempotent runtime bootstrap").execute_for_list(context).await.map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_system_status_1002) = rows_constant_system_status_1002.data.into_iter().next() {
+            let mut changed = false;
+            if constant_system_status_1002.device_system_id() != 1_u64 { constant_system_status_1002.update_device_system_id(1_u64); changed = true; }
+            if constant_system_status_1002.name() != "Offline" { constant_system_status_1002.update_name("Offline"); changed = true; }
+            if constant_system_status_1002.code() != "OFFLINE" { constant_system_status_1002.update_code("OFFLINE"); changed = true; }
+            if changed { let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1002.audit_as("reconcile model constant SystemStatus(1002)"), context).await?; }
+        } else {
+            let mut constant_system_status_1002 = SystemStatus::runtime_new(context.entity_runtime_state());
+            constant_system_status_1002.update_id(1002_u64);
+            context.initialize_generated_bootstrap_entity(&mut constant_system_status_1002, SystemStatus::ENTITY_NAME, 1002_u64)?;
+            constant_system_status_1002.update_device_system_id(1_u64);
+            constant_system_status_1002.update_name("Offline");
+            constant_system_status_1002.update_code("OFFLINE");
+            let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1002.audit_as("create model constant SystemStatus(1002)"), context).await?;
+        }
+        let rows_constant_system_status_1003 = crate::Q::system_statuses().select_self_fields().with_id_is(1003_u64).comment("what: locate generated constant").purpose("why: idempotent runtime bootstrap").execute_for_list(context).await.map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_system_status_1003) = rows_constant_system_status_1003.data.into_iter().next() {
+            let mut changed = false;
+            if constant_system_status_1003.device_system_id() != 1_u64 { constant_system_status_1003.update_device_system_id(1_u64); changed = true; }
+            if constant_system_status_1003.name() != "Sampling" { constant_system_status_1003.update_name("Sampling"); changed = true; }
+            if constant_system_status_1003.code() != "SAMPLING" { constant_system_status_1003.update_code("SAMPLING"); changed = true; }
+            if changed { let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1003.audit_as("reconcile model constant SystemStatus(1003)"), context).await?; }
+        } else {
+            let mut constant_system_status_1003 = SystemStatus::runtime_new(context.entity_runtime_state());
+            constant_system_status_1003.update_id(1003_u64);
+            context.initialize_generated_bootstrap_entity(&mut constant_system_status_1003, SystemStatus::ENTITY_NAME, 1003_u64)?;
+            constant_system_status_1003.update_device_system_id(1_u64);
+            constant_system_status_1003.update_name("Sampling");
+            constant_system_status_1003.update_code("SAMPLING");
+            let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1003.audit_as("create model constant SystemStatus(1003)"), context).await?;
+        }
+        let rows_constant_system_status_1004 = crate::Q::system_statuses().select_self_fields().with_id_is(1004_u64).comment("what: locate generated constant").purpose("why: idempotent runtime bootstrap").execute_for_list(context).await.map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_system_status_1004) = rows_constant_system_status_1004.data.into_iter().next() {
+            let mut changed = false;
+            if constant_system_status_1004.device_system_id() != 1_u64 { constant_system_status_1004.update_device_system_id(1_u64); changed = true; }
+            if constant_system_status_1004.name() != "Calibrating" { constant_system_status_1004.update_name("Calibrating"); changed = true; }
+            if constant_system_status_1004.code() != "CALIBRATING" { constant_system_status_1004.update_code("CALIBRATING"); changed = true; }
+            if changed { let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1004.audit_as("reconcile model constant SystemStatus(1004)"), context).await?; }
+        } else {
+            let mut constant_system_status_1004 = SystemStatus::runtime_new(context.entity_runtime_state());
+            constant_system_status_1004.update_id(1004_u64);
+            context.initialize_generated_bootstrap_entity(&mut constant_system_status_1004, SystemStatus::ENTITY_NAME, 1004_u64)?;
+            constant_system_status_1004.update_device_system_id(1_u64);
+            constant_system_status_1004.update_name("Calibrating");
+            constant_system_status_1004.update_code("CALIBRATING");
+            let _ = teaql_runtime::AuditedSaveExt::save(constant_system_status_1004.audit_as("create model constant SystemStatus(1004)"), context).await?;
+        }
+        Ok(())
+}
+
+
+/// Canonical KSML field to selected JSON wire name, consumed by HTTP/TFP adapters.
+pub fn generated_wire_field_mappings() -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    std::collections::BTreeMap::from([
+        ("DeviceSystem".to_owned(), std::collections::BTreeMap::from([
+            ("id".to_owned(), "id".to_owned()),
+            ("name".to_owned(), "name".to_owned()),
+            ("serial_number".to_owned(), "serialNumber".to_owned()),
+            ("create_time".to_owned(), "createTime".to_owned()),
+            ("update_time".to_owned(), "updateTime".to_owned()),
+            ("version".to_owned(), "version".to_owned())
+        ])),
+        ("SystemStatus".to_owned(), std::collections::BTreeMap::from([
+            ("device_system".to_owned(), "deviceSystem".to_owned()),
+            ("id".to_owned(), "id".to_owned()),
+            ("name".to_owned(), "name".to_owned()),
+            ("code".to_owned(), "code".to_owned()),
+            ("version".to_owned(), "version".to_owned())
+        ])),
+        ("DeviceSetting".to_owned(), std::collections::BTreeMap::from([
+            ("id".to_owned(), "id".to_owned()),
+            ("device_system".to_owned(), "deviceSystem".to_owned()),
+            ("calibration_point".to_owned(), "calibrationPoint".to_owned()),
+            ("data_keep_days".to_owned(), "dataKeepDays".to_owned()),
+            ("sampling_frequency".to_owned(), "samplingFrequency".to_owned()),
+            ("password_enabled".to_owned(), "passwordEnabled".to_owned()),
+            ("password_hash".to_owned(), "passwordHash".to_owned()),
+            ("super_password_hash".to_owned(), "superPasswordHash".to_owned()),
+            ("create_time".to_owned(), "createTime".to_owned()),
+            ("update_time".to_owned(), "updateTime".to_owned()),
+            ("version".to_owned(), "version".to_owned())
+        ])),
+        ("SampleRecord".to_owned(), std::collections::BTreeMap::from([
+            ("id".to_owned(), "id".to_owned()),
+            ("device_system".to_owned(), "deviceSystem".to_owned()),
+            ("system_status".to_owned(), "systemStatus".to_owned()),
+            ("sample_time".to_owned(), "sampleTime".to_owned()),
+            ("gas".to_owned(), "gas".to_owned()),
+            ("lref".to_owned(), "lref".to_owned()),
+            ("impurity1".to_owned(), "impurity1".to_owned()),
+            ("impurity2".to_owned(), "impurity2".to_owned()),
+            ("impurity3".to_owned(), "impurity3".to_owned()),
+            ("impurity4".to_owned(), "impurity4".to_owned()),
+            ("impurity5".to_owned(), "impurity5".to_owned()),
+            ("impurity6".to_owned(), "impurity6".to_owned()),
+            ("impurity7".to_owned(), "impurity7".to_owned()),
+            ("impurity8".to_owned(), "impurity8".to_owned()),
+            ("create_time".to_owned(), "createTime".to_owned()),
+            ("version".to_owned(), "version".to_owned())
+        ]))
+    ])
+}
+
+/// Accepted legacy aliases; empty until explicitly declared by the model.
+pub fn generated_wire_field_aliases() -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    std::collections::BTreeMap::new()
+}
+
 pub fn module() -> teaql_runtime::RuntimeModule {
     teaql_runtime::RuntimeModule::new()
         .entity::<DeviceSystem>()
         .entity::<SystemStatus>()
         .entity::<DeviceSetting>()
         .entity::<SampleRecord>()
-        .initial_graph(teaql_runtime::GraphNode::new("DeviceSystem")
-            .value("id", 1_u64)
-            .value("name", "PMS-GT660X Terminal")
-            .value("serial_number", "PMS-2026-0701")
-            .value("create_time", chrono::Utc::now())
-            .value("update_time", chrono::Utc::now())
-            .value("version", 1_i64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1001_u64)
-            .value("name", "Online")
-            .value("code", "ONLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1002_u64)
-            .value("name", "Offline")
-            .value("code", "OFFLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1003_u64)
-            .value("name", "Sampling")
-            .value("code", "SAMPLING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1004_u64)
-            .value("name", "Calibrating")
-            .value("code", "CALIBRATING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
+        .generated_schema_bootstrap(ensure_generated_bootstrap)
 }
 
 pub fn module_with_checkers() -> teaql_runtime::RuntimeModule {
-    teaql_runtime::RuntimeModule::new()
-        .entity::<DeviceSystem>()
-        .checker(teaql_runtime::TypedEntityChecker::<DeviceSystem, _>::new(DeviceSystemChecker::default()))
-        .entity::<SystemStatus>()
-        .checker(teaql_runtime::TypedEntityChecker::<SystemStatus, _>::new(SystemStatusChecker::default()))
-        .entity::<DeviceSetting>()
-        .checker(teaql_runtime::TypedEntityChecker::<DeviceSetting, _>::new(DeviceSettingChecker::default()))
-        .entity::<SampleRecord>()
-        .checker(teaql_runtime::TypedEntityChecker::<SampleRecord, _>::new(SampleRecordChecker::default()))
-        .initial_graph(teaql_runtime::GraphNode::new("DeviceSystem")
-            .value("id", 1_u64)
-            .value("name", "PMS-GT660X Terminal")
-            .value("serial_number", "PMS-2026-0701")
-            .value("create_time", chrono::Utc::now())
-            .value("update_time", chrono::Utc::now())
-            .value("version", 1_i64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1001_u64)
-            .value("name", "Online")
-            .value("code", "ONLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1002_u64)
-            .value("name", "Offline")
-            .value("code", "OFFLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1003_u64)
-            .value("name", "Sampling")
-            .value("code", "SAMPLING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1004_u64)
-            .value("name", "Calibrating")
-            .value("code", "CALIBRATING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
+    let mut module = teaql_runtime::RuntimeModule::new();
+    module = module.entity::<DeviceSystem>();
+    module = module.checker(teaql_runtime::TypedEntityChecker::<DeviceSystem, _>::new(DeviceSystemChecker::default()));
+    module = module.entity::<SystemStatus>();
+    module = module.checker(teaql_runtime::TypedEntityChecker::<SystemStatus, _>::new(SystemStatusChecker::default()));
+    module = module.entity::<DeviceSetting>();
+    module = module.checker(teaql_runtime::TypedEntityChecker::<DeviceSetting, _>::new(DeviceSettingChecker::default()));
+    module = module.entity::<SampleRecord>();
+    module = module.checker(teaql_runtime::TypedEntityChecker::<SampleRecord, _>::new(SampleRecordChecker::default()));
+    module = module.generated_schema_bootstrap(ensure_generated_bootstrap);
+    module
 }
 
 pub fn module_with_behaviors() -> teaql_runtime::RuntimeModule {
-    teaql_runtime::RuntimeModule::new()
-        .entity_with_behavior::<DeviceSystem, _>(DeviceSystemBehavior::default())
-        .entity_with_behavior::<SystemStatus, _>(SystemStatusBehavior::default())
-        .entity_with_behavior::<DeviceSetting, _>(DeviceSettingBehavior::default())
-        .entity_with_behavior::<SampleRecord, _>(SampleRecordBehavior::default())
-        .initial_graph(teaql_runtime::GraphNode::new("DeviceSystem")
-            .value("id", 1_u64)
-            .value("name", "PMS-GT660X Terminal")
-            .value("serial_number", "PMS-2026-0701")
-            .value("create_time", chrono::Utc::now())
-            .value("update_time", chrono::Utc::now())
-            .value("version", 1_i64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1001_u64)
-            .value("name", "Online")
-            .value("code", "ONLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1002_u64)
-            .value("name", "Offline")
-            .value("code", "OFFLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1003_u64)
-            .value("name", "Sampling")
-            .value("code", "SAMPLING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1004_u64)
-            .value("name", "Calibrating")
-            .value("code", "CALIBRATING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
+    let mut module = teaql_runtime::RuntimeModule::new();
+    module = module.entity_with_behavior::<DeviceSystem, _>(DeviceSystemBehavior::default());
+    module = module.entity_with_behavior::<SystemStatus, _>(SystemStatusBehavior::default());
+    module = module.entity_with_behavior::<DeviceSetting, _>(DeviceSettingBehavior::default());
+    module = module.entity_with_behavior::<SampleRecord, _>(SampleRecordBehavior::default());
+    module = module.generated_schema_bootstrap(ensure_generated_bootstrap);
+    module
 }
 
 pub fn module_with_behaviors_and_checkers() -> teaql_runtime::RuntimeModule {
-    teaql_runtime::RuntimeModule::new()
-        .entity_with_behavior::<DeviceSystem, _>(DeviceSystemBehavior::default())
-        .checker(teaql_runtime::TypedEntityChecker::<DeviceSystem, _>::new(DeviceSystemChecker::default()))
-        .entity_with_behavior::<SystemStatus, _>(SystemStatusBehavior::default())
-        .checker(teaql_runtime::TypedEntityChecker::<SystemStatus, _>::new(SystemStatusChecker::default()))
-        .entity_with_behavior::<DeviceSetting, _>(DeviceSettingBehavior::default())
-        .checker(teaql_runtime::TypedEntityChecker::<DeviceSetting, _>::new(DeviceSettingChecker::default()))
-        .entity_with_behavior::<SampleRecord, _>(SampleRecordBehavior::default())
-        .checker(teaql_runtime::TypedEntityChecker::<SampleRecord, _>::new(SampleRecordChecker::default()))
-        .initial_graph(teaql_runtime::GraphNode::new("DeviceSystem")
-            .value("id", 1_u64)
-            .value("name", "PMS-GT660X Terminal")
-            .value("serial_number", "PMS-2026-0701")
-            .value("create_time", chrono::Utc::now())
-            .value("update_time", chrono::Utc::now())
-            .value("version", 1_i64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1001_u64)
-            .value("name", "Online")
-            .value("code", "ONLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1002_u64)
-            .value("name", "Offline")
-            .value("code", "OFFLINE")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1003_u64)
-            .value("name", "Sampling")
-            .value("code", "SAMPLING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
-        .initial_graph(teaql_runtime::GraphNode::new("SystemStatus")
-            .value("id", 1004_u64)
-            .value("name", "Calibrating")
-            .value("code", "CALIBRATING")
-            .value("version", 1_i64)
-            .value("device_system_id", 1_u64))
+    let mut module = teaql_runtime::RuntimeModule::new();
+    module = module.entity_with_behavior::<DeviceSystem, _>(DeviceSystemBehavior::default());
+    module = module.checker(teaql_runtime::TypedEntityChecker::<DeviceSystem, _>::new(DeviceSystemChecker::default()));
+    module = module.entity_with_behavior::<SystemStatus, _>(SystemStatusBehavior::default());
+    module = module.checker(teaql_runtime::TypedEntityChecker::<SystemStatus, _>::new(SystemStatusChecker::default()));
+    module = module.entity_with_behavior::<DeviceSetting, _>(DeviceSettingBehavior::default());
+    module = module.checker(teaql_runtime::TypedEntityChecker::<DeviceSetting, _>::new(DeviceSettingChecker::default()));
+    module = module.entity_with_behavior::<SampleRecord, _>(SampleRecordBehavior::default());
+    module = module.checker(teaql_runtime::TypedEntityChecker::<SampleRecord, _>::new(SampleRecordChecker::default()));
+    module = module.generated_schema_bootstrap(ensure_generated_bootstrap);
+    module
 }

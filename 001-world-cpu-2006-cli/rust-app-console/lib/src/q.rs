@@ -9,7 +9,9 @@ pub struct PurposedQuery<T> {
 
 impl<T> PurposedQuery<T> {
     pub fn new(inner: T, purpose: impl Into<String>) -> Self {
-        Self { inner, purpose: purpose.into() }
+        let purpose = purpose.into();
+        assert!(!purpose.trim().is_empty(), "query purpose must not be empty");
+        Self { inner, purpose }
     }
 }
 
@@ -34,6 +36,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn match_statuses() -> MatchStatusRequest {
         MatchStatusRequest::new()
             .select_self()
@@ -51,6 +55,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn goal_categories() -> GoalCategoryRequest {
         GoalCategoryRequest::new()
@@ -70,6 +76,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn card_categories() -> CardCategoryRequest {
         CardCategoryRequest::new()
             .select_self()
@@ -87,6 +95,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn confederations() -> ConfederationRequest {
         ConfederationRequest::new()
@@ -106,6 +116,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn tournaments() -> TournamentRequest {
         TournamentRequest::new()
             .select_self()
@@ -123,6 +135,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn tournament_teams() -> TournamentTeamRequest {
         TournamentTeamRequest::new()
@@ -142,6 +156,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn match_groups() -> MatchGroupRequest {
         MatchGroupRequest::new()
             .select_self()
@@ -159,6 +175,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn tournament_matches() -> TournamentMatchRequest {
         TournamentMatchRequest::new()
@@ -178,6 +196,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn match_goals() -> MatchGoalRequest {
         MatchGoalRequest::new()
             .select_self()
@@ -195,6 +215,8 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 
     pub fn match_cards() -> MatchCardRequest {
         MatchCardRequest::new()
@@ -214,6 +236,8 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+
+
     pub fn group_standings() -> GroupStandingRequest {
         GroupStandingRequest::new()
             .select_self()
@@ -231,4 +255,6 @@ impl Q {
             .select_self_fields()
             .enhance_children_if_needed()
     }
+
+
 }

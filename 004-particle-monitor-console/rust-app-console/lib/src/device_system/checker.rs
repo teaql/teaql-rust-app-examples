@@ -1,9 +1,10 @@
+
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait DeviceSystemCheckerLogic: Send + Sync {
     fn check_and_fix_device_system(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::DeviceSystem,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -115,13 +116,88 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::DeviceSystem,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_create() {
+            entity.update_create_time(context.fix_time());
+            context.record_fix_evidence(teaql_runtime::FixEvidence::new("DeviceSystem", "create_time", teaql_runtime::FixEvidenceSource::Clock, "graphClock"));
+        }
+
+        if status.is_create() {
+            entity.update_update_time(context.fix_time());
+            context.record_fix_evidence(teaql_runtime::FixEvidence::new("DeviceSystem", "update_time", teaql_runtime::FixEvidenceSource::Clock, "graphClock"));
+        }
+        if status.is_create() || status.is_update() {
+            entity.update_update_time(context.fix_time());
+            context.record_fix_evidence(teaql_runtime::FixEvidence::new("DeviceSystem", "update_time", teaql_runtime::FixEvidenceSource::Clock, "graphClock"));
+        }
+
+
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("name") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("name"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("serial_number") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("serial_number"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("create_time") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("create_time"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("update_time") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("update_time"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+
         self.logic
-            .check_and_fix_device_system(ctx, entity, status, location, results);
+            .check_and_fix_device_system(context, entity, status, location, results);
     }
 }

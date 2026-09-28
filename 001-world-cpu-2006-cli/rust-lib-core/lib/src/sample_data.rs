@@ -1,9 +1,9 @@
+
 use std::collections::BTreeMap;
 use crate::TeaqlRuntime;
 use crate::Q;
-use teaql_core::Entity;
-use crate::request_support::TeaqlUserContextExt;
-use crate::request_support::AuditedSave;
+use teaql_core::Entity as _;
+use crate::request_support::AuditedSave as _;
 
 pub trait IntoU64 {
     fn into_u64(self) -> u64;
@@ -51,6 +51,27 @@ pub struct SampleDataSkipped {
     pub entity: &'static str,
     pub reason: String,
 }
+
+#[derive(Debug)]
+pub struct SampleDataError {
+    message: String,
+}
+
+impl SampleDataError {
+    fn from_display(error: impl std::fmt::Display) -> Self {
+        Self {
+            message: error.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for SampleDataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SampleDataError {}
 
 pub struct SampleDataState {
     pub plan: SampleDataPlan,
@@ -123,58 +144,34 @@ impl SampleDataState {
 }
 
 pub async fn generate_sample_data<C>(
-    ctx: &C,
+    context: &C,
     plan: SampleDataPlan,
-) -> Result<SampleDataReport, String>
+) -> Result<SampleDataReport, SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
     log::info!("Starting sample data generation. Scale: {:?}, Seed: {}", plan.scale, plan.seed);
     let mut state = SampleDataState::new(plan);
 
-    load_root_tournaments(ctx, &mut state).await?; //depth: 0
+    load_root_tournaments(context, &mut state).await?; //depth: 0
 
-    load_constant_card_categories(ctx, &mut state).await?;
-    load_constant_confederations(ctx, &mut state).await?;
-    load_constant_goal_categories(ctx, &mut state).await?;
-    load_constant_match_stages(ctx, &mut state).await?;
-    load_constant_match_statuses(ctx, &mut state).await?;
+    load_constant_card_categories(context, &mut state).await?;
+    load_constant_confederations(context, &mut state).await?;
+    load_constant_goal_categories(context, &mut state).await?;
+    load_constant_match_stages(context, &mut state).await?;
+    load_constant_match_statuses(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_match_groups(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_match_groups(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_tournament_teams(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_tournament_teams(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_group_standings(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_group_standings(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_tournament_matches(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_tournament_matches(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_match_cards(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_match_cards(context, &mut state).await?;
 
-    ctx.user_context().transaction_data(|| async {
-        Box::pin(generate_match_goals(ctx, &mut state)).await.map_err(|e| {
-            teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(e))
-        })
-    }).await.map_err(|e| e.to_string())?;
+    generate_match_goals(context, &mut state).await?;
 
 
     let report = state.into_report();
@@ -183,98 +180,98 @@ where
 }
 
 async fn load_root_tournaments<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::tournaments().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::tournaments().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Tournament", item.id().into_u64());
+        state.add_reference(crate::Tournament::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_card_categories<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::card_categories().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::card_categories().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Card Category", item.id().into_u64());
+        state.add_reference(crate::CardCategory::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_confederations<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::confederations().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::confederations().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Confederation", item.id().into_u64());
+        state.add_reference(crate::Confederation::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_goal_categories<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::goal_categories().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::goal_categories().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Goal Category", item.id().into_u64());
+        state.add_reference(crate::GoalCategory::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_match_stages<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::match_stages().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::match_stages().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Match Stage", item.id().into_u64());
+        state.add_reference(crate::MatchStage::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn load_constant_match_statuses<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
-    let list = Q::match_statuses().purpose("Init Sample Data").execute_for_list(ctx).await.unwrap_or_default();
+    let list = Q::match_statuses().comment("what: inspect existing entities before sample-data initialization").purpose("why: avoid duplicate sample records").execute_for_list(context).await.unwrap_or_default();
     for item in list {
-        state.add_reference("Match Status", item.id().into_u64());
+        state.add_reference(crate::MatchStatus::ENTITY_NAME, item.id().into_u64());
     }
     Ok(())
 }
 
 async fn generate_match_groups<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Match Group", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchGroup::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Match Group: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -292,7 +289,7 @@ where
     log::info!("Generating sample data for Match Group (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::match_groups().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::match_groups().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Tournament", i as usize, &used_refs) {
@@ -306,26 +303,26 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-        let entity = entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+        let entity = entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Match Group");
+        state.record_generated(crate::MatchGroup::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Match Group: {}/{}", i, fanout);
         }
 
-        state.add_reference("Match Group", entity.id().into_u64());
+        state.add_reference(crate::MatchGroup::ENTITY_NAME, entity.id().into_u64());
     }
 
     log::info!("Successfully generated sample records for Match Group.");
@@ -334,20 +331,20 @@ where
 
 
 async fn generate_tournament_teams<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Confederation").is_empty() {
-            state.record_skipped("Tournament Team", "Required dependency Confederation is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentTeam::ENTITY_NAME, "Required dependency Confederation is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Team: Required dependency Confederation is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Tournament Team", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentTeam::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Team: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -365,7 +362,7 @@ where
     log::info!("Generating sample data for Tournament Team (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::tournament_teams().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::tournament_teams().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Confederation", i as usize, &used_refs) {
@@ -399,26 +396,26 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-        let entity = entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+        let entity = entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Tournament Team");
+        state.record_generated(crate::TournamentTeam::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Tournament Team: {}/{}", i, fanout);
         }
 
-        state.add_reference("Tournament Team", entity.id().into_u64());
+        state.add_reference(crate::TournamentTeam::ENTITY_NAME, entity.id().into_u64());
     }
 
     log::info!("Successfully generated sample records for Tournament Team.");
@@ -427,26 +424,26 @@ where
 
 
 async fn generate_group_standings<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Tournament Team").is_empty() {
-            state.record_skipped("Group Standing", "Required dependency Tournament Team is missing in reference pool".to_string());
+            state.record_skipped(crate::GroupStanding::ENTITY_NAME, "Required dependency Tournament Team is missing in reference pool".to_string());
             log::info!("Skipped generating Group Standing: Required dependency Tournament Team is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Match Group").is_empty() {
-            state.record_skipped("Group Standing", "Required dependency Match Group is missing in reference pool".to_string());
+            state.record_skipped(crate::GroupStanding::ENTITY_NAME, "Required dependency Match Group is missing in reference pool".to_string());
             log::info!("Skipped generating Group Standing: Required dependency Match Group is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Group Standing", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::GroupStanding::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Group Standing: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -464,7 +461,7 @@ where
     log::info!("Generating sample data for Group Standing (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::group_standings().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::group_standings().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Tournament Team", i as usize, &used_refs) {
@@ -542,20 +539,20 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Group Standing");
+        state.record_generated(crate::GroupStanding::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Group Standing: {}/{}", i, fanout);
@@ -569,44 +566,44 @@ entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
 
 
 async fn generate_tournament_matches<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Tournament Team").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Tournament Team is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Tournament Team is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Tournament Team is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament Team").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Tournament Team is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Tournament Team is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Tournament Team is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Match Stage").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Match Stage is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Match Stage is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Match Stage is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Match Group").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Match Group is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Match Group is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Match Group is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Match Status").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Match Status is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Match Status is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Match Status is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Tournament Match", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::TournamentMatch::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Tournament Match: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -624,7 +621,7 @@ where
     log::info!("Generating sample data for Tournament Match (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::tournament_matches().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::tournament_matches().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Tournament Team", i as usize, &used_refs) {
@@ -672,7 +669,7 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_match_date(past.format("%Y-%m-%d").to_string());
+                    entity.update_match_date(past.date());
                 }
 
                 entity.update_venue_name(format!("{} {}", "Azteca Stadium", i + 1));
@@ -720,26 +717,26 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-        let entity = entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+        let entity = entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Tournament Match");
+        state.record_generated(crate::TournamentMatch::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Tournament Match: {}/{}", i, fanout);
         }
 
-        state.add_reference("Tournament Match", entity.id().into_u64());
+        state.add_reference(crate::TournamentMatch::ENTITY_NAME, entity.id().into_u64());
     }
 
     log::info!("Successfully generated sample records for Tournament Match.");
@@ -748,32 +745,32 @@ where
 
 
 async fn generate_match_cards<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Tournament Match").is_empty() {
-            state.record_skipped("Match Card", "Required dependency Tournament Match is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchCard::ENTITY_NAME, "Required dependency Tournament Match is missing in reference pool".to_string());
             log::info!("Skipped generating Match Card: Required dependency Tournament Match is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament Team").is_empty() {
-            state.record_skipped("Match Card", "Required dependency Tournament Team is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchCard::ENTITY_NAME, "Required dependency Tournament Team is missing in reference pool".to_string());
             log::info!("Skipped generating Match Card: Required dependency Tournament Team is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Card Category").is_empty() {
-            state.record_skipped("Match Card", "Required dependency Card Category is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchCard::ENTITY_NAME, "Required dependency Card Category is missing in reference pool".to_string());
             log::info!("Skipped generating Match Card: Required dependency Card Category is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Match Card", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchCard::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Match Card: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -791,7 +788,7 @@ where
     log::info!("Generating sample data for Match Card (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::match_cards().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::match_cards().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Tournament Match", i as usize, &used_refs) {
@@ -829,20 +826,20 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Match Card");
+        state.record_generated(crate::MatchCard::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Match Card: {}/{}", i, fanout);
@@ -856,32 +853,32 @@ entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
 
 
 async fn generate_match_goals<C>(
-    ctx: &C,
+    context: &C,
     state: &mut SampleDataState,
-) -> Result<(), String>
+) -> Result<(), SampleDataError>
 where
-    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+    C: TeaqlRuntime + ?Sized,
 {
         if state.ids("Tournament Match").is_empty() {
-            state.record_skipped("Match Goal", "Required dependency Tournament Match is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchGoal::ENTITY_NAME, "Required dependency Tournament Match is missing in reference pool".to_string());
             log::info!("Skipped generating Match Goal: Required dependency Tournament Match is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament Team").is_empty() {
-            state.record_skipped("Match Goal", "Required dependency Tournament Team is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchGoal::ENTITY_NAME, "Required dependency Tournament Team is missing in reference pool".to_string());
             log::info!("Skipped generating Match Goal: Required dependency Tournament Team is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Goal Category").is_empty() {
-            state.record_skipped("Match Goal", "Required dependency Goal Category is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchGoal::ENTITY_NAME, "Required dependency Goal Category is missing in reference pool".to_string());
             log::info!("Skipped generating Match Goal: Required dependency Goal Category is missing in reference pool.");
             return Ok(());
         }
 
         if state.ids("Tournament").is_empty() {
-            state.record_skipped("Match Goal", "Required dependency Tournament is missing in reference pool".to_string());
+            state.record_skipped(crate::MatchGoal::ENTITY_NAME, "Required dependency Tournament is missing in reference pool".to_string());
             log::info!("Skipped generating Match Goal: Required dependency Tournament is missing in reference pool.");
             return Ok(());
         }
@@ -899,7 +896,7 @@ where
     log::info!("Generating sample data for Match Goal (expected: {})...", fanout);
 
     for i in 0..fanout {
-        let mut entity = Q::match_goals().purpose("Init Sample Data").new_entity(ctx);
+        let mut entity = Q::match_goals().comment("what: initialize a sample entity").purpose("why: populate the requested sample dataset").new_entity(context);
         let mut used_refs = std::collections::HashSet::new();
 
                 if let Some(ref_id) = state.pick_unused_id("Tournament Match", i as usize, &used_refs) {
@@ -937,20 +934,20 @@ where
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_create_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_create_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
                 {
                     let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
                     let past = chrono::Utc::now().naive_utc() - chrono::Duration::try_days(days).unwrap_or_default();
-                    entity.update_update_time(past.format("%Y-%m-%d").to_string());
+                    entity.update_update_time(teaql_core::time::Timestamp(past.and_utc().timestamp_millis()));
                 }
 
 
 
-entity.audit_as("Init Sample Data").save(ctx).await.map_err(|e| e.to_string())?;
+entity.audit_as("Init Sample Data").save(context).await.map_err(SampleDataError::from_display)?;
 
-        state.record_generated("Match Goal");
+        state.record_generated(crate::MatchGoal::ENTITY_NAME);
 
         if i % 20 == 0 {
             log::info!("Generating Match Goal: {}/{}", i, fanout);

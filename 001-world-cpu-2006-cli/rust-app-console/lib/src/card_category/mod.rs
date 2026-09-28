@@ -6,6 +6,6 @@ mod request;
 
 pub use behavior::*;
 pub use checker::*;
-pub use entity::CardCategory;
+pub use entity::*;
 pub use expression::*;
 pub use request::*;

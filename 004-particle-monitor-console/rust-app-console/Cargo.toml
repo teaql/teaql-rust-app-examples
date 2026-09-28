@@ -1,20 +1,16 @@
+
 # TEAQL WARNING: This project uses TeaQL. TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
 # Do NOT apply traditional ORM logic here. You must strictly follow the generated API.
 [package]
 name = "pms-service-core-workspace"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80"
 description = "Application workspace for the TeaQL domain crate pms-service-core"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
 pms_service_core = { package = "pms-service-core", path = "../rust-lib-core/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-teaql-core = "4.2.2"
-teaql-runtime = "4.2.2"
-teaql-provider-sqlite = "4.2.2"
+teaql-core = "5.0.3"
 chrono = "0.4"
-ratatui = "0.30"
-crossterm = "0.29"
-rand = "0.8"
-rust_decimal = "1.36"

@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
-use teaql_runtime::{DataServiceError, RuntimeError};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
+use teaql_runtime::RuntimeError;
 
 use crate::request_support::*;
 
@@ -98,171 +98,165 @@ impl<R> CardCategoryRequest<R> {
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let repository = ctx
-            .card_category_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
         let relation_aggregates = runtime_relation_aggregates(&query_options);
         let query = authorize_query(apply_runtime_metadata(
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "CardCategory",
+                query,
+                relation_aggregates,
+            ).await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = context.fetch_entity_smart_list::<R>(
+                "CardCategory",
+                query.clone(),
+                relation_aggregates,
+            ).await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
-    pub(crate) async fn _execute_for_stream<'a, C>(
+    pub(crate) async fn _execute_for_rows<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Vec<teaql_data_service::StreamChunk>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .card_category_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
         let query = authorize_query(apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let chunks = repository.fetch_stream(&query)
-            .await?;
-        Ok(chunks)
+        ))?;
+        context.fetch_compact_smart_list("CardCategory", &query).await
+    }
+
+    pub(crate) async fn _execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<TeaqlEntityStream<'a, R, RuntimeError>, RuntimeError>
+    where
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
+    {
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))?;
+        Ok(context.fetch_entity_stream("CardCategory", query))
     }
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<Option<R>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<Option<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
 
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<SmartList<R>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    ) -> Result<SmartList<R>, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
-        R: teaql_core::Entity,
+        C: TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self.page_offset(offset, limit)._execute_for_list(context).await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<u64, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<u64, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .card_category_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query = apply_runtime_metadata(
+            self.query,
+            &query_options,
+            &self.child_enhancements,
+        );
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
         query.slice = None;
         query.relations.clear();
         query = query.count(COUNT_ALIAS);
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("CardCategory", &query).await?;
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for CardCategory is missing or not numeric"))))
+            .ok_or_else(|| RuntimeError::Graph(format!("count result for CardCategory is missing or not numeric")))
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, RuntimeError>
     where
-        C: TeaqlRepositoryProvider + ?Sized,
+        C: TeaqlRuntime + ?Sized,
     {
-        let repository = ctx
-            .card_category_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query.limit(1);
-        query.relations.clear();
-        let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
-        let rows = repository.fetch_all(&query).await?;
-        Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .card_category_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
+        let mut query = apply_runtime_metadata(
             self.query,
-            &query_options,
+            &self.query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
+        ).limit(1);
+        query.relations.clear();
+        let query = authorize_query(query)?;
+        let rows = context.fetch_compact_rows("CardCategory", &query).await?;
+        Ok(!rows.is_empty())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -527,6 +521,17 @@ impl<R> CardCategoryRequest<R> {
         self
     }
 
+    pub fn stream(mut self, chunk_size: usize) -> Self {
+        assert!(chunk_size > 0, "stream chunk size must be positive");
+        self.query = self.query.stream(chunk_size);
+        self
+    }
+
+    pub fn stream_default(mut self) -> Self {
+        self.query = self.query.stream_default();
+        self
+    }
+
     pub fn skip(mut self, offset: u64) -> Self {
         self.query = self.query.offset(offset);
         self
@@ -542,6 +547,47 @@ impl<R> CardCategoryRequest<R> {
 
     pub fn page_offset(mut self, offset: u64, limit: u64) -> Self {
         self.query = self.query.page(offset, limit);
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch(mut self) -> Self {
+        self.query = self.query.optimize_for_continuous_page_fetch();
+        self
+    }
+
+    pub fn optimize_for_continuous_page_fetch_with(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query = self
+            .query
+            .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -611,6 +657,14 @@ impl<R> CardCategoryRequest<R> {
     pub fn group_by(mut self, field: impl Into<String>) -> Self {
         self.query = self.query.group_by(field);
         self
+    }
+
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
     }
 
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
@@ -1457,10 +1511,6 @@ impl<R> CardCategoryRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn id_is_value_1001(self) -> Self {
-        self.with_id_is("1001")
-    }
-
     pub fn with_id_is_value_1001(self) -> Self {
         self.with_id_is("1001")
     }
@@ -1472,10 +1522,6 @@ impl<R> CardCategoryRequest<R> {
     }
 
 
-    pub fn id_is_value_1002(self) -> Self {
-        self.with_id_is("1002")
-    }
-
     pub fn with_id_is_value_1002(self) -> Self {
         self.with_id_is("1002")
     }
@@ -1486,10 +1532,6 @@ impl<R> CardCategoryRequest<R> {
         self.with_id_is_not("1002")
     }
 
-
-    pub fn id_is_value_1003(self) -> Self {
-        self.with_id_is("1003")
-    }
 
     pub fn with_id_is_value_1003(self) -> Self {
         self.with_id_is("1003")
@@ -1503,10 +1545,6 @@ impl<R> CardCategoryRequest<R> {
 
 
 
-    pub fn name_is_yellow(self) -> Self {
-        self.with_name_is("Yellow")
-    }
-
     pub fn with_name_is_yellow(self) -> Self {
         self.with_name_is("Yellow")
     }
@@ -1518,10 +1556,6 @@ impl<R> CardCategoryRequest<R> {
     }
 
 
-    pub fn name_is_red(self) -> Self {
-        self.with_name_is("Red")
-    }
-
     pub fn with_name_is_red(self) -> Self {
         self.with_name_is("Red")
     }
@@ -1532,10 +1566,6 @@ impl<R> CardCategoryRequest<R> {
         self.with_name_is_not("Red")
     }
 
-
-    pub fn name_is_second_yellow(self) -> Self {
-        self.with_name_is("Second Yellow")
-    }
 
     pub fn with_name_is_second_yellow(self) -> Self {
         self.with_name_is("Second Yellow")
@@ -1549,10 +1579,6 @@ impl<R> CardCategoryRequest<R> {
 
 
 
-    pub fn code_is_yello_w(self) -> Self {
-        self.with_code_is("YELLOW")
-    }
-
     pub fn with_code_is_yello_w(self) -> Self {
         self.with_code_is("YELLOW")
     }
@@ -1564,10 +1590,6 @@ impl<R> CardCategoryRequest<R> {
     }
 
 
-    pub fn code_is_re_d(self) -> Self {
-        self.with_code_is("RED")
-    }
-
     pub fn with_code_is_re_d(self) -> Self {
         self.with_code_is("RED")
     }
@@ -1578,10 +1600,6 @@ impl<R> CardCategoryRequest<R> {
         self.with_code_is_not("RED")
     }
 
-
-    pub fn code_is_second_yello_w(self) -> Self {
-        self.with_code_is("SECOND_YELLOW")
-    }
 
     pub fn with_code_is_second_yello_w(self) -> Self {
         self.with_code_is("SECOND_YELLOW")
@@ -1709,8 +1727,7 @@ impl<R> CardCategoryRequest<R> {
 
     pub fn select_tournament_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tournament", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tournament", selection));
+        self.query = self.query.relation_query("tournament", selection.into_query());
         self
 }
 
@@ -1733,11 +1750,11 @@ impl<R> CardCategoryRequest<R> {
         self
     }
     pub fn have_match_cards(self) -> Self {
-        self.with_match_card_list_matching(SelectQuery::new("MatchCard"))
+        self.with_match_card_list_matching(crate::Q::match_cards_minimal())
     }
 
     pub fn have_no_match_cards(self) -> Self {
-        self.without_match_card_list_matching(SelectQuery::new("MatchCard"))
+        self.without_match_card_list_matching(crate::Q::match_cards_minimal())
     }
 
     pub fn with_match_card_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -1771,8 +1788,7 @@ impl<R> CardCategoryRequest<R> {
 
     pub fn select_match_card_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("match_card_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("match_card_list", selection));
+        self.query = self.query.relation_query("match_card_list", selection.into_query());
         self
 }
     pub fn count_match_cards(self) -> Self {
@@ -1809,6 +1825,17 @@ impl<R> CardCategoryRequest<R> {
         self
     }
 
+    fn scalar_from_match_cards_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query_options.relation_aggregates.push(RelationAggregate::new(
+            "match_card_list",
+            alias,
+            selection,
+            true,
+        ));
+        self
+    }
+
     pub fn group_by_match_cards_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_match_cards(request)
     }
@@ -1819,84 +1846,84 @@ impl<R> CardCategoryRequest<R> {
     }
 
     pub fn sum_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().sum("minute_issued", "sum_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().sum("minute_issued", "sum_minute_issued"))
     }
     pub fn min_minute_issued_of_match_cards(self) -> Self {
         self.min_minute_issued_of_match_cards_as("min_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn min_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().min("minute_issued", "min_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().min("minute_issued", "min_minute_issued"))
     }
     pub fn max_minute_issued_of_match_cards(self) -> Self {
         self.max_minute_issued_of_match_cards_as("max_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn max_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().max("minute_issued", "max_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().max("minute_issued", "max_minute_issued"))
     }
     pub fn avg_minute_issued_of_match_cards(self) -> Self {
         self.avg_minute_issued_of_match_cards_as("avg_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn avg_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().avg("minute_issued", "avg_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().avg("minute_issued", "avg_minute_issued"))
     }
     pub fn standard_deviation_minute_issued_of_match_cards(self) -> Self {
         self.standard_deviation_minute_issued_of_match_cards_as("standard_deviation_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn standard_deviation_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().stddev("minute_issued", "stdDev_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().stddev("minute_issued", "stdDev_minute_issued"))
     }
     pub fn square_root_of_population_standard_deviation_minute_issued_of_match_cards(self) -> Self {
         self.square_root_of_population_standard_deviation_minute_issued_of_match_cards_as("square_root_of_population_standard_deviation_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn square_root_of_population_standard_deviation_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().stddev_pop("minute_issued", "stdDevPop_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().stddev_pop("minute_issued", "stdDevPop_minute_issued"))
     }
     pub fn sample_variance_minute_issued_of_match_cards(self) -> Self {
         self.sample_variance_minute_issued_of_match_cards_as("sample_variance_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn sample_variance_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().var_samp("minute_issued", "varSamp_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().var_samp("minute_issued", "varSamp_minute_issued"))
     }
     pub fn sample_population_variance_minute_issued_of_match_cards(self) -> Self {
         self.sample_population_variance_minute_issued_of_match_cards_as("sample_population_variance_minute_issued_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn sample_population_variance_minute_issued_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().var_pop("minute_issued", "varPop_minute_issued"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().var_pop("minute_issued", "varPop_minute_issued"))
     }
     pub fn min_create_time_of_match_cards(self) -> Self {
         self.min_create_time_of_match_cards_as("min_create_time_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn min_create_time_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().min("create_time", "min_create_time"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().min("create_time", "min_create_time"))
     }
     pub fn max_create_time_of_match_cards(self) -> Self {
         self.max_create_time_of_match_cards_as("max_create_time_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn max_create_time_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().max("create_time", "max_create_time"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().max("create_time", "max_create_time"))
     }
     pub fn min_update_time_of_match_cards(self) -> Self {
         self.min_update_time_of_match_cards_as("min_update_time_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn min_update_time_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().min("update_time", "min_update_time"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().min("update_time", "min_update_time"))
     }
     pub fn max_update_time_of_match_cards(self) -> Self {
         self.max_update_time_of_match_cards_as("max_update_time_of_match_cards", crate::Q::match_cards().unlimited())
     }
 
     pub fn max_update_time_of_match_cards_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_match_cards_as(alias, request.into().into_query().max("update_time", "max_update_time"))
+        self.scalar_from_match_cards_as(alias, request.into().into_query().max("update_time", "max_update_time"))
     }
 }
 
@@ -1926,28 +1953,40 @@ impl<R> From< CardCategoryRequest<R> > for QuerySelection {
 
 
 impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::CardCategory> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+where C: crate::TeaqlRuntime + ?Sized + 'a
 {
-    type Error = crate::TeaqlDataServiceError<C::CardCategoryRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Error = teaql_runtime::RuntimeError;
+    type Entity = crate::CardCategory;
+    fn save(self, context: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + Send + '_>> {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
-                .await
-                .map_err(DataServiceError::Runtime)
+            context.save_audited_entity(self).await
         })
     }
 }
 
 impl<R: teaql_core::Entity> crate::PurposedQuery<CardCategoryRequest<R>> {
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::CardCategory
+    pub fn comment(mut self, comment: impl Into<String>) -> Self {
+        self.inner.query_options.comment = Some(comment.into());
+        self
+    }
+
+    pub fn new_entity<C>(&self, context: &C) -> crate::CardCategory
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        crate::CardCategory::runtime_new(ctx.user_context().entity_root())
+        self.require_comment();
+        let mut entity = crate::CardCategory::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context.user_context().next_id(crate::CardCategory::ENTITY_NAME) {
+            entity.update_id(id);
+        }
+        teaql_core::Entity::mark_as_new(&mut entity);
+        entity
     }
 
     fn into_inner_with_trace(mut self) -> CardCategoryRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
+        self.require_comment();
+        self.inner.query.trace_chain.push(teaql_core::TraceNode::typed(
+            teaql_core::TraceKind::Purpose,
             self.inner.query.entity.clone(),
             None,
             self.purpose,
@@ -1955,78 +1994,86 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<CardCategoryRequest<R>> {
         self.inner
     }
 
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
+    }
+
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    ) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()._execute_for_page(context, offset, limit).await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<bool, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()._execute_for_exists(context).await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()._execute_for_list(context).await
     }
 
-    /// Execute query in streaming mode (chunked).
-    /// Returns a Vec of StreamChunk, each containing up to chunk_size rows.
+    pub async fn execute_for_rows<'a, C>(self, context: &'a C) -> Result<teaql_core::SmartList<teaql_core::CompactRow>, teaql_runtime::RuntimeError>
+    where
+        C: crate::TeaqlRuntime + ?Sized,
+    {
+        self.into_inner_with_trace()._execute_for_rows(context).await
+    }
+
+    /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<Vec<teaql_data_service::StreamChunk>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(self, context: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, teaql_runtime::RuntimeError>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()._execute_for_stream(context).await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()._execute_for_first(context).await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(self, context: &'a C) -> Result<Option<R>, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
+        R: teaql_core::Entity + Send + 'a,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
 
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(self, context: &'a C) -> Result<u64, teaql_runtime::RuntimeError>
     where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+        C: crate::TeaqlRuntime + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::CardCategoryRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()._execute_for_count(context).await
     }
 }
